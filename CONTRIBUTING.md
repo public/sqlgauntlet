@@ -12,6 +12,6 @@
   as `sqlgauntlet_backend_v1()`), a `fetch.sh` that pins its sources by commit or checksum, and a `backend.mk` that
   builds `build/backends/<name>.so` and its `.json` (`$(call backend_json,...)`). Leave optional hooks NULL rather
   than faking them. A SQLite-API library needs only `make sqlite-api`.
-- **The corpus:** change it upstream (corpus/UPSTREAM), then re-pin with `tools/corpus-split.py`. A new app's licence must be classed in that script (vendor or fetch) before it can come in.
+- **The corpus:** it lives here: change `corpus/projects/<app>/`, and keep each app's licence and NOTICE.md beside its SQL. A new app's licence must be classed in that script (vendor or fetch) before it can come in.
 - **Measurements:** decide on Linux instruction counts and same-run interleaved arms (README, "Performance"). macOS
   wall times are a data point, not a verdict.

@@ -2,10 +2,12 @@
 """corpus-split.py <upstream-repo> <commit> [subdir] [url]: corpus/ from an upstream corpus repository (a corpus in
 corpus/README.md's layout at <subdir>, default bench/corpus) at <commit>. url: where corpus/fetch.sh fetches it from
 (default: the checkout's origin). Each application's licence decides where its statements live:
-  vendor   MIT, Apache-2.0, BSD-3-Clause, MPL-2.0: committed here, under corpus/projects/<app>/ with the app's LICENSE
-           and the upstream NOTICE.md beside the quoted SQL, unchanged
-  fetch    GPL, AGPL, EUPL, the Elastic License 2.0 and n8n's Sustainable Use License: not committed here; corpus/fetch.sh
-           copies them from the upstream at the pinned commit (published there under their licences)
+  vendor   open-source licences, permissive and copyleft (MIT, Apache-2.0, BSD-3-Clause, MPL-2.0, GPL, AGPL, EUPL):
+           committed here, under corpus/projects/<app>/ with the app's LICENSE and the upstream NOTICE.md beside the
+           quoted SQL, unchanged; each directory stays under its app's licence, not this repository's
+  fetch    source-available licences that restrict redistribution (the Elastic License 2.0; n8n's Sustainable Use
+           License: free and non-commercial only): not committed here; corpus/fetch.sh copies them from the upstream
+           at the pinned commit, where they are published under their licences
 Writes corpus/licences.tsv (app, licence, class, app repo, app commit, statements), corpus/projects/<vendored apps>,
 corpus/manifest.vendored.jsonl (their manifest lines), corpus/UPSTREAM (url, commit and subdir) and corpus/.gitignore
 (the fetched apps). Any licence not listed above stops it: a new licence is a decision, not a default."""
@@ -19,7 +21,8 @@ import tarfile
 from pathlib import Path
 
 VENDOR = {'MIT', 'Apache-2.0', 'BSD-3-Clause', 'MPL-2.0'}
-FETCH_PREFIX = ('GPL-', 'AGPL-', 'EUPL-', 'Elastic-2.0', 'Sustainable Use License')
+VENDOR_PREFIX = ('GPL-', 'AGPL-', 'EUPL-')
+FETCH_PREFIX = ('Elastic-2.0', 'Sustainable Use License')
 repo, commit = sys.argv[1], sys.argv[2]
 base = sys.argv[3] if len(sys.argv) > 3 else 'bench/corpus'
 out = Path(__file__).resolve().parents[1] / 'corpus'
@@ -37,7 +40,7 @@ rows, vendored = [], []
 for a in apps:
     m = json.loads(git('show', f'{commit}:{base}/projects/{a}/meta.json'))
     lic = m['license'].split(' (')[0]
-    cls = 'vendor' if lic in VENDOR else 'fetch' if lic.startswith(FETCH_PREFIX) else None
+    cls = 'vendor' if lic in VENDOR or lic.startswith(VENDOR_PREFIX) else 'fetch' if lic.startswith(FETCH_PREFIX) else None
     if cls is None:
         sys.exit(f'corpus-split: {a}: licence {m["license"]!r} is neither vendor nor fetch: decide and add it')
     rows.append((a, m['license'], cls, m['repo'], m['sha'], per[a]))

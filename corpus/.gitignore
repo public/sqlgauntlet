@@ -1,26 +1,4 @@
 # fetched by corpus/fetch.sh (licence class "fetch" in licences.tsv)
 manifest.fetched.jsonl
-projects/anki/
-projects/audiobookshelf/
-projects/calibre/
-projects/darktable/
-projects/freshrss/
-projects/goatcounter/
-projects/grafana/
-projects/jellyfin/
-projects/joplin/
-projects/karakeep/
-projects/kodi/
-projects/koreader-stats/
 projects/n8n/
-projects/navidrome/
-projects/netalertx/
 projects/phoenix/
-projects/pihole-ftl/
-projects/signal-desktop/
-projects/synapse/
-projects/tautulli/
-projects/technitium-querylogs/
-projects/trilium/
-projects/vaultwarden/
-projects/zotero/

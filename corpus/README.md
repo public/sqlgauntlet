@@ -42,20 +42,31 @@ SELECT ...;
 
 ## Where it comes from, and licensing
 
-The statements were collected for [cursed-sqlite-turbo](https://github.com/public/cursed-sqlite-turbo). That repository
-is the upstream, named with the pinned commit in `UPSTREAM`. Every statement names its application's repository,
-commit and file:line. The quoted SQL keeps its application's licence (`licences.tsv`):
+The statements were collected for [cursed-sqlite-turbo](https://github.com/public/cursed-sqlite-turbo). On 2026-11-01
+this directory became their home: it was imported from turbo's `bench/corpus` at the commit in `UPSTREAM`, and changes
+are now made here. Every statement names its application's repository, commit and file:line. The quoted SQL keeps its
+application's licence (`licences.tsv`):
 
 | class | licences | apps | statements | where |
 |---|---|---:|---:|---|
-| vendor | MIT, Apache-2.0, BSD-3-Clause, MPL-2.0 | 20 | 580 | committed in `projects/`, each with its LICENSE and NOTICE.md |
-| fetch | GPL-2.0/3.0, AGPL-3.0, EUPL-1.2, Elastic-2.0, n8n's Sustainable Use License | 24 | 727 | `sh corpus/fetch.sh` copies them from the upstream at the pinned commit |
+| vendor | MIT, Apache-2.0, BSD-3-Clause, MPL-2.0, GPL-2.0/3.0, AGPL-3.0, EUPL-1.2 | 42 | 1,245 | committed in `projects/`, each with its LICENSE and NOTICE.md |
+| fetch | Elastic-2.0 (phoenix), n8n's Sustainable Use License | 2 | 62 | `sh corpus/fetch.sh` copies them from turbo's history at the pinned commit |
 
+- **Licences per directory:** each `projects/<app>/` stays under its application's licence, not this repository's
+  MIT licence. Its NOTICE.md says what is quoted and what was changed. For the GPL, AGPL and EUPL apps, `schema.sql`
+  holds only the `CREATE` statements the queries need, and `tools/fetch.sh` fetches the original files at the pinned
+  commit.
+- **Why two apps are fetched:** both licences restrict redistribution. Elastic-2.0 forbids offering the software as a
+  managed service, and n8n's licence allows only free, non-commercial distribution. So their SQL isn't committed to
+  this repository, which anyone may use commercially.
 - **MPL-2.0 files** (firefox-places, syncthing) stay under the MPL.
 - **screenpipe** is taken at its last MIT-licensed commit.
 - **The synthetic data** (`data.sql`) and `meta.json` are the upstream's own, under MIT.
-- **Fetching today:** the upstream is still private. Until it is published, `fetch.sh <local clone>` is the only way
-  to get the fetch-class apps. Never pin a commit older than the one in `UPSTREAM`: earlier history carries SQL
-  under a licence that allows no redistribution.
-- **Re-pinning:** `tools/corpus-split.py <clone> <commit>` rebuilds this directory, and refuses any licence it
-  hasn't been told how to class.
+- **Fetching today:** turbo's repository is still private. Until it is published, `fetch.sh <local clone>` is the
+  only way to get the two fetch-class apps. Their files must stay in turbo's history at the pinned commit after turbo
+  drops `bench/corpus`.
+- **Maintaining it:** `tools/run.py` runs every statement and records row counts, `tools/index.py` rescores and
+  regenerates STATS.md, and `tools/time.py` records indicative timings. These tools come from the upstream unchanged
+  and write a single `manifest.jsonl`; split it back into the vendored and fetched halves by licence class.
+  `tools/corpus-split.py` (in the repository's `tools/`) rebuilds this directory from a turbo commit, and refuses any
+  licence it hasn't been told how to class.

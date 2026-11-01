@@ -33,7 +33,7 @@ cd python && python3 -m sqlgauntlet.run speed --arm sqlite --arm libsql --rounds
 ```
 
 `fetch.sh` gets the corpus apps that can't be committed here (see [corpus/README.md](corpus/README.md)). Without it,
-runs use the 580 vendored statements. Results go to `build/run/` (or `--out`): one TSV per arm and mode, plus
+runs use the 1,245 committed statements. Results go to `build/run/` (or `--out`): one TSV per arm and mode, plus
 `env.json`. The Markdown report is printed on stdout.
 
 ## Design
