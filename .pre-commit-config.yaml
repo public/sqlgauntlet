@@ -1,14 +1,14 @@
 # pre-commit install  (or: uvx pre-commit run --all-files)
 # (the corpus upstream's own files keep their bytes: docs/PROVENANCE.md)
-exclude: ^(corpus/tools/|corpus/(INDEX|STATS|SURVEY)\.md$|corpus/scores\.json$)
+exclude: ^(workloads/doomql/mk(port|peter)\.py$|workloads/sqldoom/(mkport\.py|mkpath\.py|pg/)|corpus/tools/|corpus/(INDEX|STATS|SURVEY)\.md$|corpus/scores\.json$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^(corpus/projects/|backends/sqlite/regexp\.c$)
+        exclude: ^(corpus/projects/|backends/sqlite/(regexp|series|base64)\.c$)
       - id: end-of-file-fixer
-        exclude: ^(corpus/projects/|backends/sqlite/regexp\.c$)
+        exclude: ^(corpus/projects/|backends/sqlite/(regexp|series|base64)\.c$)
       - id: check-yaml
       - id: check-toml
       - id: check-json
@@ -26,7 +26,7 @@ repos:
     hooks:
       - id: clang-format
         files: ^(src|include|backends)/
-        exclude: ^backends/sqlite/regexp\.c$
+        exclude: ^backends/sqlite/(regexp|series|base64)\.c$
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1-1
     hooks:

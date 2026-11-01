@@ -200,6 +200,10 @@ can't redistribute.
 | `tpch/make.py [SF]` | TPC-H at scale factor SF (default 0.1). dbgen comes from tpch-kit at a pinned commit, built here. There are two projects: the 22 queries, and small statements (point lookups, short ranges) where per-execution overhead dominates | any backend, as a corpus |
 | `clickbench/make.py [rows]` | ClickBench's 43 queries on a checksummed prefix of its dataset (default 1M rows; only the prefix is downloaded), loaded as ClickBench loads SQLite | any backend, as a corpus |
 | `speedtest1/run.py <arm>...` | SQLite's own benchmark (`test/speedtest1.c` from the pinned source tree), linked with each backend's own `sqlite3.c` and compile line. Arms are interleaved and verification hashes compared | SQLite-API backends |
+| `doomql/make.py [ticks]` | two DOOMQL games (Lukas Vogel's, through our SQLite port; Peter Gostev's, unchanged), MIT: every frame one query (~95,000 VDBE opcodes), at game states built by replaying a fixed input script; frames compared across engines | any SQLite-dialect backend, as a corpus |
+| `sqldoom/make.py [--poses N]` | SQLDoom (CedarDB, GPL-2.0: its own directory, fetched, never committed): one 1,561-line query rendering Freedoom's E1M1, the camera and clock as parameters; the map database comes from SQLDoom's WAD loader on Postgres in Docker (`--db` reuses one) | any SQLite-dialect backend, as a corpus |
+| `doom-vdbe/run.py <arm>...` | Doom as one VDBE program (Turso's Doom example, rebuilt instruction by instruction as a SQLite Vdbe), run through `sqlite3_step`; every frame's hash must equal Turso's own and the other arms'. The export (Turso's `vdbecc` in Docker, GPL Doom, the shareware WAD) is fetched and built, never committed (`--export` reuses one) | SQLite-API backends on SQLite 3.54 |
+| `feedapi/make.py` | the twelve-dollar server challenge's feed API in SQL: the HTTP parser trigger, HMAC-SHA256 as a recursive CTE, the JSON routes, on the challenge's 50k users, 500k posts and 2M likes (`--seed-db` reads an existing seed) | SQLite-dialect backends, as a corpus |
 | `sqlancer/` | SQLancer campaigns (NoREC, query partitioning, PQS) through sqlite-jdbc rebuilt from each backend's `sqlite3.c`, with `repro.sh` and `reduce.py` to replay and shrink what it finds | SQLite-API backends; needs a JDK and Maven |
 
 - **TPC-H and ClickBench** produce corpus directories (`build/workloads/<name>`) that `sqlgauntlet-run --corpus` takes.
@@ -237,4 +241,6 @@ tools/                  corpus-split.py, identity.py, check-corpus.py
 tests/                  smoke.py, workloads.py (make test)
 ```
 
-Licence: MIT (`LICENSE`). The corpus's quoted SQL keeps each application's licence (corpus/README.md).
+Licence: MIT (`LICENSE`), with two exceptions. The corpus's quoted SQL keeps each application's licence
+(corpus/README.md). `workloads/sqldoom/` is GPL-2.0-only, because it is derived from SQLDoom (its COPYING.md). Each
+workload's NOTICE.md says what it fetches and under which licence.

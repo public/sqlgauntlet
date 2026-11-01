@@ -1,7 +1,8 @@
 /* backends/postgres/adapter.c: the backend over libpq, a client adapter for a PostgreSQL server.
 ** - Server: SG_PG_URL (default postgresql://postgres@127.0.0.1:5432; the backend's arm defaults set it, make postgres).
 ** - Databases: the driver works on database files, so the "file" here is a marker holding a database's name. Opening a
-**   path whose marker is missing or empty creates a fresh database, sg_<file name>, and writes the marker; the
+**   path whose marker is missing or empty creates a fresh database, sg_<file name>_<hash of its directory>, and writes
+**   the marker; the
 **   runner's copies of the marker then all name that database. Writes run inside BEGIN ... ROLLBACK, as for every
 **   backend, so copies can share it.
 ** - Statements: server-side prepared statements (PQprepare, PQexecPrepared), parameters $1..$N (the dialect layer
@@ -11,6 +12,7 @@
 **   and fits, else a float; bool as 1/0; bytea as a blob; everything else (text, varchar, dates, json, ...) as text.
 ** - Not yet: engine_ms (the server's own execution time) is -1. */
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,12 +66,18 @@ static sg_conn *p_open(const char *path, char *err, size_t n) {
     fclose(f);
     db[strcspn(db, "\r\n")] = 0;
   }
-  if (!db[0]) { /* a fresh database, named after the file */
+  if (!db[0]) { /* a fresh database, named after the file and a hash of its directory (two runs never share one) */
     const char *b = strrchr(path, '/');
     b = b ? b + 1 : path;
+    char dir[4096] = ".";
+    if (b > path) snprintf(dir, sizeof dir, "%.*s", (int)(b - path - 1), path);
+    char real[4096];
+    const char *rd = realpath(dir, real) ? real : dir;
+    unsigned long long h = 1469598103934665603ULL;
+    for (const char *p = rd; *p; p++) h = (h ^ (unsigned char)*p) * 1099511628211ULL;
     size_t k = (size_t)snprintf(db, sizeof db, "sg_");
-    for (; *b && *b != '.' && k < sizeof db - 1; b++) db[k++] = isalnum((unsigned char)*b) ? (char)tolower((unsigned char)*b) : '_';
-    db[k] = 0;
+    for (; *b && *b != '.' && k < 48; b++) db[k++] = isalnum((unsigned char)*b) ? (char)tolower((unsigned char)*b) : '_';
+    snprintf(db + k, sizeof db - k, "_%08llx", h & 0xffffffffULL);
     PGconn *m = connect_db("postgres", err, n);
     if (!m) return 0;
     char sql[300];

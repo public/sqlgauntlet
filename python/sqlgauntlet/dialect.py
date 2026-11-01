@@ -40,10 +40,20 @@ def number_params(sql):
 
 
 def transpile(sg, sql, dialect):
-    """sqlglot's translation, every identifier lowercased and quoted (SQLite's names are case-insensitive; export.py
-    creates them the same way, so reserved words such as user work), and ON CONFLICT's target without the NULLS FIRST
-    that sqlglot adds to every column list it reads as an ordering"""
-    out = sg.transpile(sql, read='sqlite', write=dialect, unsupported_level=sg.ErrorLevel.RAISE, identify=True, normalize=True)
+    """sqlglot's translation: every identifier lowercased and quoted, quoted ones too (SQLite's names are case-insensitive
+    even quoted; export.py creates them the same way, so reserved words such as user work); SQLite's schema prefix main.
+    dropped; ON CONFLICT's target without the NULLS FIRST that sqlglot adds to every column list it reads as an
+    ordering"""
+    out = []
+    for e in sg.parse(sql, read='sqlite'):
+        if e is None:
+            continue
+        for i in e.find_all(sg.exp.Identifier):
+            i.set('this', i.this.lower())
+        for t in e.find_all(sg.exp.Table):
+            if t.args.get('db') is not None and t.db.lower() == 'main':
+                t.set('db', None)
+        out.append(e.sql(dialect=dialect, unsupported_level=sg.ErrorLevel.RAISE, identify=True))
     fix = lambda m: re.sub(r'\s+NULLS\s+(FIRST|LAST)', '', m.group(0))
     return [re.sub(r'ON CONFLICT\s*\([^()]*\)', fix, x) for x in out]
 

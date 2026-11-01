@@ -36,7 +36,8 @@ $(B)/callgrind/sqlgauntlet: src/main.c src/driver.c include/sqlgauntlet.h
 backend_json = python3 -c 'import json, sys; print(json.dumps({"name": sys.argv[1], "dialect": sys.argv[2], \
   "env": dict(kv.split("=", 1) for kv in sys.argv[3:])}))' '$(1)' '$(2)' $(3) > $(B)/backends/$(1).json
 
-include $(wildcard backends/*/backend.mk)
+include backends/sqlite/backend.mk   # (first: the others build on its SQLite-API rules)
+include $(filter-out backends/sqlite/backend.mk,$(wildcard backends/*/backend.mk))
 
 # make test: tests/smoke.py over a few vendored apps (TEST_APPS) with two SQLite-API backends, tests/workloads.py over
 # TPC-H's path on generated rows; make lint: CI's lint job

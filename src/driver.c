@@ -364,8 +364,9 @@ static int prep(Q *q, sg_stmt **st, R *r) {
 ** step, inside one transaction. Every field is bound as text, so the column's declared type converts it (as the sqlite3
 ** shell's .import does, and dbgen's loaders). tbl: '|'-separated, with or without a trailing '|' (TPC-H's dbgen). csv:
 ** RFC 4180, ',' separated, a quoted field may hold '"' (as "") and newlines. csvn: csv where an unquoted \N is NULL
-** (PostgreSQL's convention; export.py writes it). A line with the wrong field count stops it. */
-static int rec(FILE *f, int csv, char **buf, size_t *cap, size_t *off, unsigned char *qf, int nf) { /* one record's fields into buf */
+** (PostgreSQL's convention; export.py writes it). tsv: tab-separated, every field verbatim (no quoting), as the
+** sqlite3 shell's ascii mode imports it. A line with the wrong field count stops it. */
+static int rec(FILE *f, int csv, int sep, char **buf, size_t *cap, size_t *off, unsigned char *qf, int nf) { /* one record's fields into buf */
   size_t n = 0;
   int c, inq = 0, k = 0, any = 0;
   off[0] = 0;
@@ -391,7 +392,7 @@ static int rec(FILE *f, int csv, char **buf, size_t *cap, size_t *off, unsigned 
     }
     if (c == '\r') continue;
     if (c == '\n') break;
-    if (c == (csv ? ',' : '|')) {
+    if (c == sep) {
       (*buf)[n++] = 0;
       if (++k < nf + 1) {
         off[k] = n;
@@ -403,13 +404,13 @@ static int rec(FILE *f, int csv, char **buf, size_t *cap, size_t *off, unsigned 
   }
   if (!any) return -1;
   (*buf)[n] = 0;
-  if (!csv && n && off[k] == n && k == nf) return k; /* (a trailing '|': its empty last field isn't a field) */
+  if (sep == '|' && n && off[k] == n && k == nf) return k; /* (a trailing '|': its empty last field isn't a field) */
   return k + 1;
 }
 static int load(const char *table, const char *file, const char *fmt) {
-  int csvn = !strcmp(fmt, "csvn"), csv = csvn || !strcmp(fmt, "csv");
-  if (!csv && strcmp(fmt, "tbl")) {
-    fprintf(stderr, "sqlgauntlet: load: format %s: tbl, csv or csvn\n", fmt);
+  int csvn = !strcmp(fmt, "csvn"), csv = csvn || !strcmp(fmt, "csv"), tsv = !strcmp(fmt, "tsv"), sep = csv ? ',' : tsv ? '\t' : '|';
+  if (!csv && !tsv && strcmp(fmt, "tbl")) {
+    fprintf(stderr, "sqlgauntlet: load: format %s: tbl, tsv, csv or csvn\n", fmt);
     return 2;
   }
   char sql[1024];
@@ -439,7 +440,7 @@ static int load(const char *table, const char *file, const char *fmt) {
   long rows = 0;
   int k, rc = 0;
   if (B->exec(db, "BEGIN", err, sizeof err)) fprintf(stderr, "sqlgauntlet: load: BEGIN: %s\n", err);
-  while ((k = rec(f, csv, &buf, &cap, off, qf, nc)) >= 0) {
+  while ((k = rec(f, csv, sep, &buf, &cap, off, qf, nc)) >= 0) {
     if (k == 1 && !buf[0]) continue; /* (an empty line) */
     if (k != nc) {
       fprintf(stderr, "sqlgauntlet: load: %s: record %ld has %d fields, %s has %d columns\n", file, rows + 1, k, table, nc);
@@ -581,7 +582,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
           exec1(q, st, x);
           alt += x->alt;
           runs++;
-          if (k && (r.rows != r0.rows || (!wall && r.h != r0.h) || r.changes != r0.changes || strcmp(r.err, r0.err))) {
+          if (k && (r.rows != r0.rows || (!wall && (q->ordered ? r.h != r0.h : r.hs != r0.hs)) || r.changes != r0.changes || strcmp(r.err, r0.err))) {
             status = "unstable";
             snprintf(r0.err + strlen(r0.err), sizeof r0.err - strlen(r0.err), " [run %d: %ld rows %016llx %s]", k, r.rows, r.h, r.err);
             break;

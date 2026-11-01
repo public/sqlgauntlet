@@ -76,6 +76,30 @@ def parse_queries(path):
     return res
 
 
+def one_line(sql):
+    """a SQL script as one line (an @@X line): comments dropped, newlines outside quotes as spaces"""
+    out, i, n = [], 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c in "'\"":
+            j = i + 1
+            while j < n and not (sql[j] == c and (j + 1 >= n or sql[j + 1] != c)):
+                j += 2 if sql[j] == c else 1
+            out.append(sql[i : j + 1].replace('\n', "' || char(10) || '") if c == "'" else sql[i : j + 1])
+            i = j + 1
+        elif sql.startswith('--', i):
+            while i < n and sql[i] != '\n':
+                i += 1
+        elif c.isspace():  # (whitespace outside quotes: one space)
+            if out and out[-1] != ' ':
+                out.append(' ')
+            i += 1
+        else:
+            out.append(c)
+            i += 1
+    return ''.join(out).strip()
+
+
 def _put(path, text):  # (unchanged files keep their time: a database is rebuilt only when its build.sql is newer)
     if not path.exists() or path.read_text() != text:
         path.write_text(text)
@@ -128,7 +152,9 @@ def prep(corpus, out, scale='1', projects=(), ids=None, wave='', heavy=False, di
             _put(out / f'{p}.post.sql', post)
         else:
             build += analyze
-        f = [f"@@X {x.rstrip(';')};\n" for x in meta.get('pragmas', [])]
+        f = [] if tr else [f"@@X {x.rstrip(';')};\n" for x in meta.get('pragmas', [])]  # (SQLite's connection settings: SQLite dialects only)
+        if not tr and (pdir / 'connect.sql').exists():  # (an app's per-connection setup: temp tables, triggers, views)
+            f.append(f'@@X {one_line((pdir / "connect.sql").read_text())}\n')
         skipped = []
         for q in qs:
             tags = man.get(q['id'], {}).get('tags', [])

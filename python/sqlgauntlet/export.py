@@ -63,7 +63,9 @@ def export(db, out, p, dialect, log=None):
     for t, n, _, _sql in rows:
         if t != 'table' or shadow(n):
             continue
-        cols = con.execute(f'PRAGMA table_info({qi(n)})').fetchall()  # cid, name, type, notnull, default, pk
+        # (table_xinfo: generated columns too, exported as plain columns holding their values; hidden 1 is a virtual
+        #  table's hidden column)
+        cols = [c[:6] for c in con.execute(f'PRAGMA table_xinfo({qi(n)})').fetchall() if c[6] != 1]  # cid, name, type, notnull, default, pk
         kinds = {c[1]: {k for (k,) in con.execute(f'SELECT DISTINCT typeof({qi(c[1])}) FROM {qi(n)}')} - {'null'} for c in cols}
         defs, rowid = [], None
         pkc = [c for c in cols if c[5]]
@@ -88,7 +90,7 @@ def export(db, out, p, dialect, log=None):
         ddl.append(f'CREATE TABLE {qi(n)} ({", ".join(defs)});')
         f = data / f'{n}.csv'
         with open(f, 'w') as fh:
-            for r in con.execute(f'SELECT * FROM {qi(n)}'):
+            for r in con.execute(f'SELECT {", ".join(qi(c[1]) for c in cols)} FROM {qi(n)}'):
                 fh.write(','.join(field(v) for v in r) + '\n')
         loads.append(f'{qi(n)}\t{f.resolve()}\tcsvn')
         for _, ix, _, origin, _ in con.execute(f'PRAGMA index_list({qi(n)})').fetchall():

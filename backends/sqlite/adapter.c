@@ -1,7 +1,7 @@
 /* backends/sqlite/adapter.c: the backend over SQLite's C API, for SQLite and for any library that provides that API (a
 ** fork such as libSQL, a patched build). Compiled with that library's sqlite3.h and sqlite3.c into one shared object
-** (backends/sqlite/backend.mk, make sqlite-api). It adds regexp() (SQLite's ext/misc/regexp.c, as the sqlite3 CLI has)
-** unless built with -DSG_NO_REGEXP. alt_path: the execution never stepped SQLite's bytecode VM
+** (backends/sqlite/backend.mk, make sqlite-api). It adds regexp(), generate_series and base64() (SQLite's ext/misc/regexp.c,
+** series.c and base64.c, which the sqlite3 CLI compiles in) unless built with -DSG_NO_CLI_EXTENSIONS. alt_path: the execution never stepped SQLite's bytecode VM
 ** (SQLITE_STMTSTATUS_VM_STEP stayed 0), i.e. the library answered it some other way; SQLite itself always steps it.
 ** -DSG_NAME, -DSG_VERSION_NOTE: the backend's name and a note after its version (e.g. the patch's commit). */
 #include <string.h>
@@ -9,10 +9,12 @@
 #include "sqlite3.h"
 #include "sqlgauntlet.h"
 
-#ifndef SG_NO_REGEXP
+#ifndef SG_NO_CLI_EXTENSIONS
 #define SQLITE_EXTENSION_INIT1
 #define SQLITE_EXTENSION_INIT2(x)
 #include "regexp.c"
+#include "series.c"
+#include "base64.c"
 #endif
 #ifndef SG_VERSION_NOTE
 #define SG_VERSION_NOTE ""
@@ -28,8 +30,10 @@ static sg_conn *a_open(const char *path, char *err, size_t n) {
     sqlite3_close(db);
     return 0;
   }
-#ifndef SG_NO_REGEXP
+#ifndef SG_NO_CLI_EXTENSIONS
   sqlite3_regexp_init(db, 0, 0);
+  sqlite3_series_init(db, 0, 0);
+  sqlite3_base64_init(db, 0, 0);
 #endif
   return (sg_conn *)db;
 }

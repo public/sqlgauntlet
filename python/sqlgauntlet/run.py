@@ -192,6 +192,7 @@ def main(argv=None):
             build_db(bw, db, bs, q / f'{p}.load.tsv', q / f'{p}.post.sql', tmp)
     dirs = {'sqlite': (q, d)}
     for dl in sorted({x.dialect for x in arms} - {'sqlite'}):  # (another dialect: its statements translated, its data exported)
+        from . import dialect as D
         from . import export as X
 
         qd, dd = out / f'q-{dl}', out / f'db-{dl}'
@@ -202,16 +203,17 @@ def main(argv=None):
         builder = next(x for x in arms if x.dialect == dl)
         for p in projects:
             db = dd / f'{p}.db'
-            newer = max((d / f'{p}.db').stat().st_mtime, Path(X.__file__).stat().st_mtime) if (d / f'{p}.db').exists() else None
-            if newer and (not db.exists() or db.stat().st_mtime < newer):  # (re-exported when the reference or export.py changed)
+            code = max(Path(m.__file__).stat().st_mtime for m in (X, D))
+            newer = max((d / f'{p}.db').stat().st_mtime, code) if (d / f'{p}.db').exists() else None
+            if newer and (not db.exists() or db.stat().st_mtime < newer):  # (re-exported when the reference or the export code changed)
                 for note in X.export(d / f'{p}.db', qd, p, dl):
                     print(f'sqlgauntlet-run: export {dl}: {note}', file=sys.stderr)
                 build_db(builder, db, qd / f'{p}.build.sql', qd / f'{p}.load.tsv', qd / f'{p}.post.sql', tmp, blocks=True)
         dirs[dl] = (qd, dd)
-    unbuilt = [p for p in projects if not all((dd / f'{p}.db').exists() for _, dd in dirs.values())]
-    if unbuilt:  # (their statements show as missing in compare's report)
-        print(f'sqlgauntlet-run: not built, skipped: {", ".join(unbuilt)}', file=sys.stderr)
-        projects = [p for p in projects if p not in unbuilt]
+    for dl, (_, dd) in dirs.items():  # (an app a dialect couldn't build: that dialect's arms skip it, the rest run it)
+        unbuilt = [p for p in projects if not (dd / f'{p}.db').exists()]
+        if unbuilt:
+            print(f'sqlgauntlet-run: {dl}: not built, skipped (its statements show as missing): {", ".join(unbuilt)}', file=sys.stderr)
     env = environment(arms, o.corpus)
     env.update(
         mode=o.mode,
@@ -232,6 +234,8 @@ def main(argv=None):
             with open(out / f'{arm.name}.check.tsv', 'w') as f:
                 qa, da = dirs[arm.dialect]
                 for p in projects:
+                    if not (da / f'{p}.db').exists():
+                        continue
                     shutil.copyfile(da / f'{p}.db', c)
                     arm.run(['check', c, qa / f'{p}.q'], out=f)
             n = sum(1 for l in open(out / f'{arm.name}.check.tsv') if l.startswith('C'))
@@ -259,6 +263,8 @@ def main(argv=None):
                 order = [arms[(j + r + k) % n] for j in range(n)]
                 for arm in order:
                     qa, da = dirs[arm.dialect]
+                    if not (da / f'{p}.db').exists():
+                        continue
                     shutil.copyfile(da / f'{p}.db', c)  # (one copy per project, arm and round: writes roll back)
                     for m in modes:
                         if o.callgrind and arm.kind == 'so':  # (deterministic instructions; times are valgrind's)
