@@ -46,7 +46,7 @@ def load(d, arm):
     for l in open(os.path.join(d, f'{arm}.check.tsv'), errors='replace'):
         p = l.rstrip('\n').split('\t')
         if p[0] == 'C' and len(p) >= 9:
-            r[p[1]] = dict(st=p[2], rows=p[3], ch=p[4], h=p[5], hs=p[6], served=p[7], err=p[8])
+            r[p[1]] = dict(st=p[2], rows=p[3], ch=p[4], h=p[5], hs=p[6], alt=p[7], err=p[8])
         elif p[0] == 'N' and len(p) >= 4 and p[1] in r:
             r[p[1]].update(nh=p[2], nhs=p[3])
     return r
@@ -105,7 +105,7 @@ def main(argv=None):
         f'{sum(x["st"] == "unstable" for x in S.values())} unstable (runs disagree with each other)\n'
     )
     exp = {}  # (prep's <p>.expected.tsv: the manifest's row and change counts, recorded with the sqlite3 CLI at scale 1;
-    #  changes only for writes: after a read, the C line's changes is the last write's, sqlite3_changes() as turbo's driver)
+    #  changes only for writes: after a read, an engine may still report the last write's count)
     for f in glob.glob(os.path.join(d, 'q', '*.expected.tsv')):
         for l in open(f):
             i, r, c = l.rstrip('\n').split('\t')
@@ -178,11 +178,11 @@ def main(argv=None):
         for i, vs, part, why in rows:
             f.write(f'{i}\t' + '\t'.join(vs[a] or '-' for a in arms[1:]) + f'\t{part}\t{why}\n')
     for a in arms[1:]:
-        sv = [x['served'] for x in R[a].values() if '/' in x['served']]
+        sv = [x['alt'] for x in R[a].values() if '/' in x['alt']]
         full = sum(1 for s in sv if s.split('/')[0] == s.split('/')[1] and s != '0/0')
         some = sum(1 for s in sv if 0 < int(s.split('/')[0]) < int(s.split('/')[1]))
         if full or some:
-            print(f'\n{a} served (its fast path ran every execution / some): {full} / {some} statements')
+            print(f'\n{a} on its alternative path (every execution / some): {full} / {some} statements')
     return 1 if any(v not in ('same',) for a in V for v in V[a].values()) else 0
 
 

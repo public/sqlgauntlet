@@ -1,9 +1,12 @@
 """run: a corpus through several arms, interleaved. An arm is a backend and the environment it runs under:
-  stock, turbo, turbooff, libsql, turso      presets (build/backends/<b>.so; turbo with QC_SERVE=1, turbooff QC_SERVE=0)
-  <name>=so:<backend.so>[:K=V,...]           any backend shared object, through this repository's driver
-  <name>=exe:<program>[:K=V,...]             any program with the driver's command line (<program> <mode> <db> <file>
-                                             ...), e.g. cursed-sqlite-turbo's own bench/corpus/corpus.c build: its
-                                             lines are this driver's, so the reports compare it like any arm
+  <backend>                                  build/backends/<backend>.so, with the environment in <backend>.json
+  <name>=<backend>[:K=V:...]                 the same backend under another name, with more environment (e.g. a
+                                             backend's own switches: two arms of one build)
+  <name>=so:<backend.so>[:K=V:...]           any backend shared object, through this repository's driver
+  <name>=exe:<program>[:K=V:...]             any program with the driver's command line (<program> <mode> <db> <file>
+                                             ...) and output lines, e.g. another harness held to this one
+Every variable any arm sets is removed from the inherited environment before each arm adds its own, so an arm's
+switches never leak into another's.
 sqlgauntlet-run check: every statement 8 times per arm (the driver's check mode) on fresh copies of one database per
   project -> <out>/<arm>.check.tsv, then compare's report.
 sqlgauntlet-run speed: --rounds rounds; in each, every project's database is copied once per arm and the arms run it in
@@ -24,37 +27,34 @@ from pathlib import Path
 from . import prep as P
 
 ROOT = Path(__file__).resolve().parents[2]
-PRESETS = {
-    'stock': ('so', 'build/backends/stock.so', {}),
-    'turbo': ('so', 'build/backends/turbo.so', {'QC_SERVE': '1'}),
-    'turbooff': ('so', 'build/backends/turbo.so', {'QC_SERVE': '0'}),
-    'libsql': ('so', 'build/backends/libsql.so', {}),
-    'turso': ('so', 'build/backends/turso.so', {}),
-}
-QC_VARS = ('QC_SERVE', 'QC_VM_ONLY', 'QC_NOADAPT', 'QC_STREAM', 'QC_ADAPT_MARGIN', 'QC_ADAPT_MIN_US', 'QC_STATS')
+BACKENDS = ROOT / 'build' / 'backends'
+ARM_VARS = set()  # (every variable some arm sets: none inherits another's)
+
+
+def backend_env(name):
+    j = BACKENDS / f'{name}.json'
+    return json.loads(j.read_text()).get('env', {}) if j.exists() else {}
 
 
 class Arm:
     def __init__(self, spec, driver):
         name, _, rest = spec.partition('=')
-        if not rest:
-            if name not in PRESETS:
-                sys.exit(f'sqlgauntlet-run: no preset arm {name} (presets: {", ".join(PRESETS)})')
-            kind, path, env = PRESETS[name]
-            path = str(ROOT / path)
-        else:
-            kind, _, rest = rest.partition(':')
-            parts = rest.split(':')
-            path, env = parts[0], dict(kv.split('=', 1) for kv in parts[1:] if kv)
-        if kind not in ('so', 'exe'):
-            sys.exit(f'sqlgauntlet-run: arm {spec}: kind must be so or exe')
+        parts = (rest or name).split(':')
+        if parts[0] in ('so', 'exe'):
+            kind, path, env = parts[0], parts[1], {}
+            extra = parts[2:]
+        else:  # (a built backend, by name)
+            kind, path, env = 'so', str(BACKENDS / f'{parts[0]}.so'), backend_env(parts[0])
+            extra = parts[1:]
+        env.update(kv.split('=', 1) for kv in extra if kv)
+        ARM_VARS.update(env)
         self.name, self.kind, self.path, self.env = name, kind, os.path.abspath(path), env
         if not os.path.exists(self.path):
-            sys.exit(f'sqlgauntlet-run: arm {name}: {self.path} not found (make backends?)')
+            sys.exit(f'sqlgauntlet-run: arm {name}: {self.path} not found (make {Path(self.path).stem}?)')
         self.cmd = [driver, '--backend', self.path] if kind == 'so' else [self.path]
 
     def environ(self, extra=None):
-        e = {k: v for k, v in os.environ.items() if k not in QC_VARS}
+        e = {k: v for k, v in os.environ.items() if k not in ARM_VARS}
         e.update(TZ='UTC', **self.env)
         e.update(extra or {})
         return e
@@ -125,7 +125,7 @@ def main(argv=None):
     a.add_argument('projects', nargs='*')
     a.add_argument('--corpus', default=os.environ.get('SQLGAUNTLET_CORPUS', str(ROOT / 'corpus')))
     a.add_argument('--out', default=str(ROOT / 'build' / 'run'))
-    a.add_argument('--arm', action='append', help='repeatable; default stock and turbo')
+    a.add_argument('--arm', action='append', help='repeatable; the first is the reference; default sqlite and libsql')
     a.add_argument('--build-with', help='the arm that builds the databases (default: the first)')
     a.add_argument('--driver', default=str(ROOT / 'build' / 'sqlgauntlet'))
     a.add_argument('--rounds', type=int, default=1)
@@ -141,7 +141,7 @@ def main(argv=None):
     a.add_argument('--keep', action='store_true')
     a.add_argument('--no-report', action='store_true')
     o = a.parse_args(argv)
-    arms = [Arm(s, o.driver) for s in (o.arm or ['stock', 'turbo'])]
+    arms = [Arm(s, o.driver) for s in (o.arm or ['sqlite', 'libsql'])]
     if len({x.name for x in arms}) != len(arms):
         sys.exit('sqlgauntlet-run: arm names must differ')
     out = Path(o.out)
@@ -157,7 +157,7 @@ def main(argv=None):
     projects = sorted(p.name[:-2] for p in q.glob('*.q'))
     bw = next((x for x in arms if x.name == o.build_with), arms[0]) if o.build_with else arms[0]
     if bw.kind == 'exe':
-        bw = Arm('stock', o.driver)  # (a foreign program may not build: stock does)
+        bw = Arm('sqlite', o.driver)  # (a foreign program may not build: SQLite does)
     for p in projects:
         db, bs = d / f'{p}.db', q / f'{p}.build.sql'
         if not db.exists() or db.stat().st_mtime < bs.stat().st_mtime:

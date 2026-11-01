@@ -1,8 +1,9 @@
-/* sqlite.c: the backend over SQLite's C API, for any library that provides it: stock SQLite, cursed-sqlite-turbo,
-** libSQL. Compile it with that library's sqlite3.h and link its sqlite3.o (adapters/build.sh). It adds regexp() (SQLite's
-** ext/misc/regexp.c, as the sqlite3 CLI the corpus was recorded with) unless the library has its own. served: the
-** execution never stepped SQLite's VM (SQLITE_STMTSTATUS_VM_STEP stayed 0), which is what an engine serving
-** statements inside sqlite3_step (turbo) looks like; stock SQLite always steps it, so stock reports 0. */
+/* backends/sqlite/adapter.c: the backend over SQLite's C API, for SQLite and for any library that provides that API (a
+** fork such as libSQL, a patched build). Compiled with that library's sqlite3.h and sqlite3.c into one shared object
+** (backends/sqlite/backend.mk, make sqlite-api). It adds regexp() (SQLite's ext/misc/regexp.c, as the sqlite3 CLI has)
+** unless built with -DSG_NO_REGEXP. alt_path: the execution never stepped SQLite's bytecode VM
+** (SQLITE_STMTSTATUS_VM_STEP stayed 0), i.e. the library answered it some other way; SQLite itself always steps it.
+** -DSG_NAME, -DSG_VERSION_NOTE: the backend's name and a note after its version (e.g. the patch's commit). */
 #include <string.h>
 #include <stdio.h>
 #include "sqlite3.h"
@@ -97,7 +98,7 @@ static const char *a_errmsg(sg_conn *c) { return sqlite3_errmsg((sqlite3 *)c); }
 static void a_exec_begin(sg_stmt *s) { sqlite3_stmt_status((sqlite3_stmt *)s, SQLITE_STMTSTATUS_VM_STEP, 1); }
 static void a_exec_stats(sg_stmt *s, sg_exec_stats *e) {
   int vm = sqlite3_stmt_status((sqlite3_stmt *)s, SQLITE_STMTSTATUS_VM_STEP, 0);
-  e->served = vm == 0;
+  e->alt_path = vm == 0;
   e->engine_counters[0] = vm;
 }
 static const char *a_version(void) {

@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      # (the vendored corpus only: the fetched apps need cursed-sqlite-turbo, and the turbo backend its sources)
+      # (the vendored corpus only: the fetched apps come from the corpus upstream)
       - run: make CC=${{ matrix.cc }} test
       - if: failure()
         uses: actions/upload-artifact@v7

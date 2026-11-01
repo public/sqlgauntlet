@@ -1,7 +1,7 @@
-/* turso.c: the backend over Turso's C ABI (sdk-kit/turso.h; Turso, formerly Limbo, a Rust rewrite of SQLite's engine
+/* backends/turso/adapter.c: the backend over Turso's C ABI (sdk-kit/turso.h; Turso, formerly Limbo, a Rust rewrite of SQLite's engine
 ** that reads and writes SQLite files). Synchronous I/O. Bindings are kept here and bound again after each reset, since
 ** turso.h doesn't promise that a reset keeps them (sqlite3_reset does: the driver relies on it). Turso has no notion
-** of "served" (-1). Build: scripts/fetch-turso.sh build, then make build/backends/turso.so. */
+** of an alternative path (-1). Build: backends/turso/fetch.sh build, then make turso. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

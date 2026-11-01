@@ -3,19 +3,19 @@
 **   build <db> <project.build.sql>                make the database (a script through the backend's exec)
 **   check <db> <project.q> [only-id]              each statement 6 times on one handle, then twice freshly prepared:
 **        (a statement tagged wallclock agrees with itself by row count: its values follow the clock)
-**        C id status rows changes hash msethash served/runs error      status ok | err | unstable (runs disagree)
+**        C id status rows changes hash msethash alt/runs error      status ok | err | unstable (runs disagree)
 **        N id nhash nmsethash                      the same rows normalised (below), for comparing different engines
 **   hot|prep <db> <project.q> [reps] [budget-ms] [only-id]   timing:
-**        T id rows hash first-ms median-ms mean-ms runs instr cycles served/runs error
+**        T id rows hash first-ms median-ms mean-ms runs instr cycles alt/runs error
 **     hot: prepared once, then 1 + reps executions (reset between); prep: every execution prepares, binds, steps and
 **     finalizes. reps stop early once budget-ms is spent (at least SG_MIN_REPS, default 3). instr, cycles: user mode,
 **     per execution (Linux perf_event_open; -1 elsewhere or when the kernel refuses).
 **     SG_EXEC=1: after each T line, one E line per counted execution, in order (k from 1), for warm-up vs steady state:
-**        E id k served ms instr cycles engine-ms
+**        E id k alt ms instr cycles engine-ms
 **   rows <db> <project.q> <id> [limit]            the statement's normalised rows, one R line each (disagreement reports)
 **   info                                          the backend's name, dialect and version: I name dialect version
-** The C and T lines are cursed-sqlite-turbo's bench/corpus/corpus.c lines, byte for byte for the same rows (the same
-** FNV-1a over each value's storage class and bytes), so its compare.py and summarise.py read them too.
+** hash and msethash are FNV-1a over each value's kind and bytes. alt/runs: of the runs, how many the backend reported on
+** its alternative path (sg_exec_stats.alt_path; 0 for a backend without one).
 ** Reads run in autocommit; writes inside BEGIN ... ROLLBACK, outside the timed span. hash: the rows in order;
 ** msethash: the rows as a multiset.
 ** Normalised values (N lines, rows): integers and floats are one kind, numbers; a float with an exact integer value
@@ -108,7 +108,7 @@ typedef struct Q {
 typedef struct R {
   long rows, changes;
   unsigned long long h, hs, nh, nhs;
-  int served;
+  int alt;
   double engine_ms;
   char err[256];
 } R;
@@ -208,7 +208,7 @@ static void params_eval(Q *q) {
         ((char *)pv[i].own)[v.n] = 0;
         pv[i].v.p = pv[i].own;
       }
-    } else pv[i].v.type = 0; /* (unbound, as corpus.c leaves a literal its engine can't evaluate) */
+    } else pv[i].v.type = 0; /* (left unbound: the engine cannot evaluate the literal) */
     if (st) B->finalize(st);
     free(s);
   }
@@ -326,7 +326,7 @@ static int exec1(Q *q, sg_stmt *st, R *r) {
   r->changes = (long)B->changes(db);
   sg_exec_stats es = { -1, -1, { -1, -1, -1, -1 } };
   if (B->exec_stats) B->exec_stats(st, &es);
-  r->served = es.served == 1 && rc == SG_DONE;
+  r->alt = es.alt_path == 1 && rc == SG_DONE;
   r->engine_ms = es.engine_ms;
   r->err[0] = 0;
   if (rc != SG_DONE) snprintf(r->err, sizeof r->err, "%s", B->errmsg(db));
@@ -408,7 +408,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
   if (!check && !rows) perf_open();
   double *t = malloc(sizeof *t * (size_t)(reps + 1));
   struct E {
-    int served;
+    int alt;
     double ms, ins, cyc, eng;
   } *ex = sexec ? malloc(sizeof *ex * (size_t)(reps + 1)) : 0;
   for (int i = 0; i < nq; i++) {
@@ -433,7 +433,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
     }
     if (check) {
       const char *status = "ok";
-      int served = 0, runs = 0, wall = tagged(q, "wallclock"); /* (reads the clock: its runs agree by row count, as compare holds it) */
+      int alt = 0, runs = 0, wall = tagged(q, "wallclock"); /* (reads the clock: its runs agree by row count, as compare holds it) */
       if (prep(q, &st, &r0)) status = "err";
       else {
         for (int k = 0; k < 8; k++) { /* 6 runs on one handle, then 2 on fresh handles */
@@ -447,7 +447,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
           }
           R *x = k ? &r : &r0;
           exec1(q, st, x);
-          served += x->served;
+          alt += x->alt;
           runs++;
           if (k && (r.rows != r0.rows || (!wall && r.h != r0.h) || r.changes != r0.changes || strcmp(r.err, r0.err))) {
             status = "unstable";
@@ -459,10 +459,10 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
       }
       if (st) B->finalize(st);
       clean(r0.err);
-      printf("C\t%s\t%s\t%ld\t%ld\t%016llx\t%016llx\t%d/%d\t%s\n", q->id, status, r0.rows, r0.changes, r0.h, r0.hs, served, runs, r0.err[0] ? r0.err : "-");
+      printf("C\t%s\t%s\t%ld\t%ld\t%016llx\t%016llx\t%d/%d\t%s\n", q->id, status, r0.rows, r0.changes, r0.h, r0.hs, alt, runs, r0.err[0] ? r0.err : "-");
       printf("N\t%s\t%016llx\t%016llx\n", q->id, r0.nh, r0.nhs);
     } else {
-      int nt = 0, served = 0;
+      int nt = 0, alt = 0;
       double spent = 0, first;
       if (hot) {
         if (prep(q, &st, &r0)) goto bad;
@@ -474,10 +474,10 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
           exec1(q, st, &r);
           t[nt] = t_exec;
           spent += t_exec;
-          served += r.served;
+          alt += r.alt;
           if (ex)
             ex[nt] =
-              (struct E){ r.served, t_exec, perf_fd[0] < 0 ? -1 : (double)(perf_read(0) - i0), perf_fd[1] < 0 ? -1 : (double)(perf_read(1) - c0), r.engine_ms };
+              (struct E){ r.alt, t_exec, perf_fd[0] < 0 ? -1 : (double)(perf_read(0) - i0), perf_fd[1] < 0 ? -1 : (double)(perf_read(1) - c0), r.engine_ms };
           nt++;
         }
         B->finalize(st);
@@ -503,9 +503,9 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
           perf_on(0);
           if (ex)
             ex[nt] =
-              (struct E){ r.served, t[nt], perf_fd[0] < 0 ? -1 : (double)(perf_read(0) - i0), perf_fd[1] < 0 ? -1 : (double)(perf_read(1) - c0), r.engine_ms };
+              (struct E){ r.alt, t[nt], perf_fd[0] < 0 ? -1 : (double)(perf_read(0) - i0), perf_fd[1] < 0 ? -1 : (double)(perf_read(1) - c0), r.engine_ms };
           spent += t[nt++];
-          served += r.served;
+          alt += r.alt;
         }
       }
       {
@@ -515,9 +515,9 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         qsort(t, (size_t)nt, sizeof *t, cmpd);
         clean(r0.err);
         printf("T\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first, nt ? sum / nt : first,
-               nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, served, nt, r0.err[0] ? r0.err : "-");
+               nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, alt, nt, r0.err[0] ? r0.err : "-");
         for (int k = 0; ex && k < nt; k++)
-          printf("E\t%s\t%d\t%d\t%.5f\t%.0f\t%.0f\t%.5f\n", q->id, k + 1, ex[k].served, ex[k].ms, ex[k].ins, ex[k].cyc, ex[k].eng);
+          printf("E\t%s\t%d\t%d\t%.5f\t%.0f\t%.0f\t%.5f\n", q->id, k + 1, ex[k].alt, ex[k].ms, ex[k].ins, ex[k].cyc, ex[k].eng);
       }
       fflush(stdout);
       continue;

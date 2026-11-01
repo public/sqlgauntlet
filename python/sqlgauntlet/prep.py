@@ -1,11 +1,11 @@
 """prep: a corpus directory (projects/<p>/{meta.json,schema.sql,data.sql,queries.sql} and manifest.jsonl, the layout of
-cursed-sqlite-turbo's bench/corpus) as the driver's flat files, one pair per project:
+corpus/README.md) as the driver's flat files, one pair per project:
   <p>.build.sql   the database: journal_mode OFF, temp _cfg(scale), schema.sql, data.sql, ANALYZE unless meta.json says
                   "analyze": false
   <p>.q           meta.json's "pragmas" (@@X), then each statement: @@Q <id> <ordered> <write> <tags>, its @@P
                   parameters, its SQL
 ordered = 1 when the statement has ORDER BY (rows compared in order, else as a multiset); write = 1 when it is not a
-read (it runs inside BEGIN ... ROLLBACK). This is turbo's bench/corpus/prep.py's output, byte for byte, for dialect sqlite.
+read (it runs inside BEGIN ... ROLLBACK). The corpus is in SQLite's dialect; dialect.py makes it another's.
 
 Other dialects (dialect.py): each statement's text for that dialect comes from the corpus's overrides
 (<corpus>/dialects/<dialect>.jsonl, {"id", "sql"} or {"id", "untranslatable": reason}), else from sqlglot's
@@ -50,7 +50,7 @@ WAVE1 = {
 
 
 def parse_queries(path):
-    """queries.sql's annotated blocks (turbo's tools/run.py parser: blocks start with -- @id)"""
+    """queries.sql's annotated blocks (each starts with -- @id)"""
     res, cur = [], None
     for line in Path(path).read_text().splitlines():
         m = re.match(r"\s*--\s*@(\w+)\s?(.*)$", line)
@@ -80,7 +80,7 @@ def _put(path, text):  # (unchanged files keep their time: a database is rebuilt
 
 
 def manifest(corpus):
-    """every manifest*.jsonl: turbo's one manifest.jsonl, or sqlgauntlet's vendored and fetched halves"""
+    """every manifest*.jsonl: one manifest.jsonl, or the vendored and fetched halves (corpus/README.md)"""
     man = {}
     for f in sorted(Path(corpus).glob('manifest*.jsonl')):
         for l in open(f):

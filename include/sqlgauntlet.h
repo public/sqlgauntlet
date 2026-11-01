@@ -1,19 +1,21 @@
 /* sqlgauntlet.h: the backend ABI (version 1) and the driver library's entry points.
 **
-** A backend is a table of functions, sg_backend. An in-process engine fills it directly (adapters/sqlite.c over any
-** SQLite-API library, adapters/turso.c over Turso's C ABI); a networked one fills it with a client (open = connect,
-** step = fetch the next row of the result). The driver only ever calls through the table, so one driver measures
-** every backend the same way.
+** A backend is a table of functions, sg_backend. An in-process engine fills it directly over its own API
+** (backends/<name>/adapter.c); a networked one fills it with a client (open = connect, prepare = a server-side
+** prepare, step = fetch the next row). The driver only ever calls through the table, so one driver measures every
+** backend the same way.
 **
 ** Two ways to use it:
 **   - as a plug-in: build the adapter and its engine into a shared object that exports sqlgauntlet_backend_v1(); the
-**     sqlgauntlet CLI loads it with --backend <file> (dlopen, RTLD_LOCAL, so several SQLite builds never clash).
+**     sqlgauntlet CLI loads it with --backend <file> (dlopen, RTLD_LOCAL, so two builds of one engine never clash).
 **   - as a library: link libsqlgauntlet.a and call sg_main() with a table of your own (a project testing its engine
 **     links its build statically, with no copy of this repository in its tree: see README "Using sqlgauntlet from
 **     another project").
 **
-** Values cross the ABI as sg_value: SQLite's five storage classes, with the same numbers. Text and blob pointers stay
-** valid until the next call on that statement (step, column on another index, reset, finalize). */
+** Values cross the ABI as sg_value, one of five kinds: integer, float, text, blob, NULL (numbered as SQLite numbers its
+** storage classes, so a SQLite-API adapter passes them through). An engine with richer types maps each to one of them
+** (a decimal to text or float, a date to text, a boolean to integer) and says how in its adapter. Text and blob
+** pointers stay valid until the next call on that statement (step, column on another index, reset, finalize). */
 #ifndef SQLGAUNTLET_H
 #define SQLGAUNTLET_H
 #include <stdint.h>
@@ -24,7 +26,7 @@ extern "C" {
 
 #define SQLGAUNTLET_ABI 1
 
-enum { SG_INTEGER = 1, SG_FLOAT = 2, SG_TEXT = 3, SG_BLOB = 4, SG_NULL = 5 }; /* (SQLITE_INTEGER ... SQLITE_NULL) */
+enum { SG_INTEGER = 1, SG_FLOAT = 2, SG_TEXT = 3, SG_BLOB = 4, SG_NULL = 5 };
 enum { SG_OK = 0, SG_ROW = 100, SG_DONE = 101, SG_ERROR = 1 };
 
 typedef struct sg_value {
@@ -37,11 +39,12 @@ typedef struct sg_value {
 
 /* per-execution numbers a backend may know better than the driver's clock (all optional: -1 = unknown) */
 typedef struct sg_exec_stats {
-  int served;                 /* 1: the backend's fast path ran this execution (turbo: SQLite's VM never stepped), 0: the
-                          reference path, -1: the backend has no such notion */
+  int alt_path;               /* 1: the engine ran this execution on an alternative path it can report (a compiled or
+                                 specialised plan, a JIT, a result cache), 0: its usual path, -1: no such notion. An
+                                 engine still choosing between paths is warming up (see summarise) */
   double engine_ms;           /* time the engine itself spent (a server's own measure); the driver reports wall - engine as
                           protocol time for client adapters */
-  int64_t engine_counters[4]; /* backend-defined (e.g. VM steps, pages read); named by counter_names */
+  int64_t engine_counters[4]; /* backend-defined (e.g. interpreter steps, pages read); named by counter_names */
 } sg_exec_stats;
 
 typedef struct sg_conn sg_conn; /* opaque to the driver */
@@ -78,7 +81,7 @@ typedef struct sg_backend {
 typedef const sg_backend *(*sg_backend_fn)(void);
 #define SQLGAUNTLET_BACKEND_SYMBOL "sqlgauntlet_backend_v1"
 
-/* the driver: the CLI's main, callable with a backend table instead of --backend (argv as the CLI's, see sqlgauntlet.c) */
+/* the driver: the CLI's main, callable with a backend table instead of --backend (argv as the CLI's, see src/driver.c) */
 int sg_main(const sg_backend *b, int argc, char **argv);
 
 #ifdef __cplusplus

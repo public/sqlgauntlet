@@ -4,8 +4,8 @@
   independently, 1,000 draws). A group's ratio is the geometric mean of its statements', bootstrapped the same way.
 - Distributions: the per-statement time ratios' percentiles and how many are over 1.02 or under 0.98.
 - Warm-up vs steady state (with per-execution E lines, sqlgauntlet-run --exec-lines): an execution belongs to the
-  warm-up while the arm is still deciding, i.e. up to the last one whose served flag differs from the one before
-  (turbo's adapt trying the interpreter and its plan before its verdict); the rest is the steady state. The first,
+  warm-up while the arm is still deciding, i.e. up to the last one whose alternative-path flag differs from the one
+  before (an adaptive engine trying its paths before it settles on one); the rest is the steady state. The first,
   untimed execution (prepare and first run, T's first-ms) is reported apart. Steady-state ratios count only
   steady-state executions, and only for statements with at least 3 of them on both sides: fewer measures warm-up.
 - Left out, and listed: statements whose rows differ from the reference's (unless they read the clock), that error,
@@ -44,7 +44,7 @@ def load_q(d):
 
 
 def load(d, arm, mode):
-    T, E = {}, {}  # id -> round -> (ms, instr, cycles, rows, hash, served, runs, err, first); id -> round -> [(served, ms, ins, cyc)]
+    T, E = {}, {}  # id -> round -> (ms, instr, cycles, rows, hash, alt, runs, err, first); id -> round -> [(alt, ms, ins, cyc)]
     for f in glob.glob(os.path.join(d, f'{arm}.{mode}.*.tsv')):
         rnd = int(f.rsplit('.', 2)[-2])
         for l in open(f, errors='replace'):
@@ -58,7 +58,7 @@ def load(d, arm, mode):
 
 
 def split(ex):
-    """(warm-up executions, steady-state executions): the warm-up ends at the last change of the served flag"""
+    """(warm-up executions, steady-state executions): the warm-up ends at the last change of the alternative-path flag"""
     last = 0
     for k in range(1, len(ex)):
         if ex[k][0] != ex[k - 1][0]:
@@ -135,13 +135,13 @@ def main(argv=None):
                 lo, hi = ci([gm([b[i] for i in its]) for b in boot[kn]])
                 return f'{r:.3f} [{lo:.3f}, {hi:.3f}]'
 
-            served = {i: sum(v[5] for v in A[i].values()) / max(1, sum(v[6] for v in A[i].values())) for i in items}
-            hdr = '| group | statements | served | ' + ' | '.join(kns) + ' | over 1.02 | under 0.98 |'
+            alt = {i: sum(v[5] for v in A[i].values()) / max(1, sum(v[6] for v in A[i].values())) for i in items}
+            hdr = '| group | statements | alt path | ' + ' | '.join(kns) + ' | over 1.02 | under 0.98 |'
             sep = '|---|---:|---:|' + '---:|' * len(kns) + '---:|---:|'
 
             def row(name, its):
                 print(
-                    f'| {name} | {len(its)} | {sum(1 for i in its if served[i] > 0.5)} | '
+                    f'| {name} | {len(its)} | {sum(1 for i in its if alt[i] > 0.5)} | '
                     + ' | '.join(cell(kn, its) for kn in kns)
                     + f' | {sum(1 for i in its if ratio["time"][i] > 1.02)} | {sum(1 for i in its if ratio["time"][i] < 0.98)} |'
                 )
@@ -150,9 +150,9 @@ def main(argv=None):
             print(hdr)
             print(sep)
             row('**all**', items)
-            if any(served.values()):
-                row('served (most executions)', [i for i in items if served[i] > 0.5])
-                row('not served', [i for i in items if served[i] <= 0.5])
+            if any(alt.values()):
+                row('alternative path (most executions)', [i for i in items if alt[i] > 0.5])
+                row('usual path', [i for i in items if alt[i] <= 0.5])
             for lo, hi, nm in ((0, 0.01, 'reference < 10 µs'), (0.01, 0.1, '10-100 µs'), (0.1, 1, '0.1-1 ms'), (1, 1e9, '≥ 1 ms')):
                 its = [i for i in items if lo <= m(S, i, rs, 0) < hi]
                 if its:
@@ -186,7 +186,7 @@ def main(argv=None):
                     )
                 if wu:
                     print(
-                        f'Warm-up (executions before the arm\'s last change of served flag): {len(wu)} statements; median '
+                        f'Warm-up (executions before the arm\'s last change of path): {len(wu)} statements; median '
                         f'{statistics.median(x[1] for x in wu):.0f} executions, {sum(x[2] for x in wu):.1f} ms in all per round'
                     )
             fm = gm([statistics.fmean(A[i][r][8] for r in ra) / statistics.fmean(S[i][r][8] for r in rs) for i in items if all(S[i][r][8] > 0 for r in rs)])
@@ -211,10 +211,10 @@ def main(argv=None):
                 ('Largest wins', sorted(items, key=lambda i: ratio['time'][i])[:15]),
             ):
                 print(f'\n{title}:\n')
-                print(f'| statement | {ref} ms | served | ' + ' | '.join(kns) + ' |')
+                print(f'| statement | {ref} ms | alt path | ' + ' | '.join(kns) + ' |')
                 print('|---|---:|---:|' + '---:|' * len(kns))
                 for i in sel:
-                    print(f'| {i} | {m(S, i, rs, 0):.4f} | {served[i]:.0%} | {one(i)} |')
+                    print(f'| {i} | {m(S, i, rs, 0):.4f} | {alt[i]:.0%} | {one(i)} |')
             if left:
                 c = collections.Counter(w.split(':')[0] for _, w in left)
                 print(
