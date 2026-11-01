@@ -1,0 +1,109 @@
+# bench/winloss.py's classification: source, query or test, shape class. ClickBench is classified from its SQL text
+# (winloss.py); speedtest1 by testset/number (its default testset, mix1, runs main, orm, cte, json, fp,
+# parsenumber, star and app, whose test numbers repeat); TPC-H by query. Classes:
+#   point        point lookup by key (one row)
+#   short        short one-shot statements (constants, tiny scans), where per-statement overhead dominates
+#   range        range scan over an index (short ranges, many executions)
+#   scan-expr    filtered or expression-heavy scan (WHERE on unindexed columns, LIKE, function calls per row)
+#   agg          aggregation / GROUP BY over a scan
+#   join         multi-table join (usually with an aggregate on top)
+#   subquery     correlated subqueries, EXISTS / NOT EXISTS, IN (subquery), CTEs feeding a filter
+#   topn         ORDER BY ... LIMIT N
+#   sort         ORDER BY without LIMIT (a full sort)
+#   distinct     DISTINCT, count(DISTINCT)
+#   setop        UNION / INTERSECT / EXCEPT
+#   compute      compute-heavy: recursive CTEs, window functions, arithmetic in loops
+#   write        INSERT / UPDATE / DELETE / DDL (qc doesn't run them; differences are side effects or noise)
+#   maint        integrity_check, ANALYZE, reset (not qc)
+speedtest1	main/100	write
+speedtest1	main/110	write
+speedtest1	main/120	write
+speedtest1	main/130	scan-expr
+speedtest1	main/140	scan-expr
+speedtest1	main/142	sort
+speedtest1	main/145	topn
+speedtest1	main/150	write
+speedtest1	main/160	range
+speedtest1	main/161	range
+speedtest1	main/170	range
+speedtest1	main/180	write
+speedtest1	main/190	write
+speedtest1	main/200	maint
+speedtest1	main/210	write
+speedtest1	main/230	write
+speedtest1	main/240	write
+speedtest1	main/250	write
+speedtest1	main/260	scan-expr
+speedtest1	main/270	write
+speedtest1	main/280	write
+speedtest1	main/290	write
+speedtest1	main/300	write
+speedtest1	main/310	join
+speedtest1	main/320	subquery
+speedtest1	main/400	write
+speedtest1	main/410	point
+speedtest1	main/500	write
+speedtest1	main/510	point
+speedtest1	main/520	distinct
+speedtest1	main/980	maint
+speedtest1	main/990	maint
+speedtest1	main/999	maint
+speedtest1	orm/100	write
+speedtest1	orm/110	point
+speedtest1	orm/999	maint
+speedtest1	cte/100	compute
+speedtest1	cte/200	compute
+speedtest1	cte/300	compute
+speedtest1	cte/400	setop
+speedtest1	cte/999	maint
+speedtest1	json/100	write
+speedtest1	json/110	write
+speedtest1	json/120	write
+speedtest1	json/130	write
+speedtest1	json/140	scan-expr
+speedtest1	json/141	short
+speedtest1	json/150	write
+speedtest1	json/160	write
+speedtest1	json/999	maint
+speedtest1	fp/100	write
+speedtest1	fp/110	scan-expr
+speedtest1	fp/120	write
+speedtest1	fp/130	range
+speedtest1	fp/140	scan-expr
+speedtest1	fp/150	scan-expr
+speedtest1	fp/999	maint
+speedtest1	parsenumber/100	short
+speedtest1	parsenumber/110	short
+speedtest1	parsenumber/200	short
+speedtest1	parsenumber/210	short
+speedtest1	parsenumber/999	maint
+speedtest1	star/100	write
+speedtest1	star/110	write
+speedtest1	star/120	write
+speedtest1	star/130	join
+speedtest1	star/140	join
+speedtest1	star/999	maint
+speedtest1	app/100	write
+speedtest1	app/110	short
+tpch	Q01	agg
+tpch	Q02	subquery
+tpch	Q03	join
+tpch	Q04	subquery
+tpch	Q05	join
+tpch	Q06	scan-expr
+tpch	Q07	join
+tpch	Q08	join
+tpch	Q09	join
+tpch	Q10	join
+tpch	Q11	agg
+tpch	Q12	join
+tpch	Q13	agg
+tpch	Q14	join
+tpch	Q15	agg
+tpch	Q16	distinct
+tpch	Q17	subquery
+tpch	Q18	subquery
+tpch	Q19	join
+tpch	Q20	subquery
+tpch	Q21	subquery
+tpch	Q22	subquery

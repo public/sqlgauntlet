@@ -185,8 +185,9 @@ include/sqlgauntlet.h   the backend ABI and sg_main
 src/                    driver.c (libsqlgauntlet.a), main.c (the CLI)
 backends/<name>/        adapter.c, fetch.sh (pinned sources), backend.mk; sqlite also has regexp.c (SQLite's, public domain)
 python/sqlgauntlet/     prep, dialect, run, compare, summarise
-corpus/                 the corpus (README.md), licences.tsv, UPSTREAM, fetch.sh
-contrib/                engines built outside this repository (turbo)
+corpus/                 the corpus (README.md), licences.tsv, UPSTREAM, fetch.sh, tools/ (authoring: run, index, time)
+contrib/turbo/          cursed-sqlite-turbo from a pinned commit (turbo, turbo-serve, turbo-diff) and its imported
+                        apparatus: corpus harness, speedtest1, TPC-H, ClickBench, SQLancer, broker payloads
 tools/                  corpus-split.py, identity.py, check-corpus.py
 tests/                  smoke.py (make test)
 ```
