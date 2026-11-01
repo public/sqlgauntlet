@@ -121,10 +121,9 @@ def main(argv=None):
                 and 'wallclock' not in tags.get(i, [])
                 and (x['rows'] != exp[i][0] or ('read' not in tags.get(i, []) and x['ch'] != exp[i][1]))
             ]
-            print(
-                f'{a} against the manifest\'s counts: {sum(1 for i in R[a] if i in exp) - len(off)} agree, {len(off)} differ'
-                + (': ' + ', '.join(f'{i} ({R[a][i]["rows"]} rows, manifest {exp[i][0]})' for i in off[:12]) if off else '')
-            )
+            ex = [f'{i} ({R[a][i]["rows"]} rows / {R[a][i]["ch"]} changes, manifest {exp[i][0]} / {exp[i][1]})' for i in off[:12]]
+            agree = sum(1 for i in R[a] if i in exp) - len(off)
+            print(f'{a} against the manifest\'s counts: {agree} agree, {len(off)} differ' + (': ' + ', '.join(ex) if ex else ''))
         print()
     print('| arm | ' + ' | '.join(ORDER) + ' |')
     print('|---|' + '---:|' * len(ORDER))
