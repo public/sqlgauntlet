@@ -1,0 +1,16 @@
+{
+ "found": "2026-11-01, fuzz/props.py test_differential (Hypothesis), minimised by its shrinking",
+ "what": "a REAL stored in a TEXT column becomes text: SQLite 3.54 writes 1e15 as '1000000000000000.0'",
+ "schema": [
+  "CREATE TABLE t0(c0 INTEGER, c1 INTEGER, c2 TEXT)"
+ ],
+ "data": [
+  "INSERT INTO t0 VALUES (NULL, NULL, 1000000000000000.0)"
+ ],
+ "sql": "SELECT t0.c2, count(*) FROM t0 GROUP BY t0.c2",
+ "params": [],
+ "expect": {
+  "turso": "differs: Turso writes '1.0e+15' (its own real-to-text formatting); not yet reported upstream",
+  "libsql": "differs: libSQL's SQLite 3.47 formats it with 15 significant digits (a version difference, as real-to-text-dbl-max)"
+ }
+}

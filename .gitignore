@@ -8,3 +8,5 @@ __pycache__/
 *.db
 *.log
 qct.*.txt
+.hypothesis/
+.pytest_cache/

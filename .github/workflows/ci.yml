@@ -56,3 +56,15 @@ jobs:
         with:
           name: test-postgres
           path: build/test-postgres/*.tsv
+  fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install hypothesis pytest sqlglot==30.27.0
+      # (the dev profile: 40 examples a property; turso and turbo need toolchains or sources CI doesn't have)
+      - run: make all sqlite libsql && python3 tests/regressions.py libsql
+      - run: cd python && SG_FUZZ_BACKENDS=libsql python3 -m pytest -q sqlgauntlet/fuzz/props.py -p no:cacheprovider
+      - run: cd python && python3 -m sqlgauntlet.fuzz.mutate ../corpus ../build/fuzz/mutated memos atuin --per 2 && python3 -m sqlgauntlet.run check --corpus ../build/fuzz/mutated --out ../build/fuzz/mutrun --arm sqlite --arm libsql --no-report
