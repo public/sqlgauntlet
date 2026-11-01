@@ -1,6 +1,7 @@
 /* driver.c: libsqlgauntlet's driver, sg_main(). It reads a corpus file (python/sqlgauntlet/prep.py's <project>.q) and runs
 ** its statements through a backend table (include/sqlgauntlet.h). Modes, argv[1]:
 **   build <db> <project.build.sql>                make the database (a script through the backend's exec)
+**   load <db> <table> <file> <tbl|csv>            a data file into a table (load() below; workloads' load.tsv)
 **   check <db> <project.q> [only-id]              each statement 6 times on one handle, then twice freshly prepared:
 **        (a statement tagged wallclock agrees with itself by row count: its values follow the clock)
 **        C id status rows changes hash msethash alt/runs error      status ok | err | unstable (runs disagree)
@@ -29,6 +30,9 @@
 #include <time.h>
 #include <unistd.h>
 #include "sqlgauntlet.h"
+#ifdef SG_CALLGRIND /* (make callgrind: build/callgrind/sqlgauntlet, the counters are valgrind's) */
+#include <valgrind/callgrind.h>
+#endif
 #ifdef __linux__
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>
@@ -54,7 +58,10 @@ static int cmpd(const void *a, const void *b) {
   return x < y ? -1 : x > y;
 }
 
-/* user-mode instructions and cycles over the timed spans */
+/* user-mode instructions and cycles over the timed spans. Built with -DSG_CALLGRIND (make callgrind) the counted
+** regions are callgrind's instead: collection toggled on and off around them, zeroed per statement, and dumped with the
+** label "<id> <hot|prep> <executions>" (python/sqlgauntlet/cg.py puts the counts into the T lines): deterministic
+** instruction counts on any Linux, for statements too short to time. */
 static int perf_fd[2] = { -1, -1 };
 static void perf_open(void) {
 #ifdef __linux__
@@ -78,7 +85,13 @@ static void perf_open(void) {
 #endif
 }
 static void perf_on(int on) {
-#ifdef __linux__
+#ifdef SG_CALLGRIND
+  static int cg;
+  if (on != cg) {
+    CALLGRIND_TOGGLE_COLLECT;
+    cg = on;
+  }
+#elif defined(__linux__)
   for (int i = 0; i < 2; i++)
     if (perf_fd[i] >= 0) ioctl(perf_fd[i], on ? PERF_EVENT_IOC_ENABLE : PERF_EVENT_IOC_DISABLE, 0);
 #else
@@ -91,7 +104,9 @@ static long long perf_read(int i) {
   return v;
 }
 static void perf_reset(void) {
-#ifdef __linux__
+#ifdef SG_CALLGRIND
+  CALLGRIND_ZERO_STATS;
+#elif defined(__linux__)
   for (int i = 0; i < 2; i++)
     if (perf_fd[i] >= 0) ioctl(perf_fd[i], PERF_EVENT_IOC_RESET, 0);
 #endif
@@ -345,6 +360,102 @@ static int prep(Q *q, sg_stmt **st, R *r) {
   bind(q, *st);
   return 0;
 }
+/* load <db> <table> <file> <tbl|csv>: a data file into an existing table through the backend's own prepare, bind and
+** step, inside one transaction. Every field is bound as text, so the column's declared type converts it (as the sqlite3
+** shell's .import does, and dbgen's loaders). tbl: '|'-separated, with or without a trailing '|' (TPC-H's dbgen). csv:
+** RFC 4180, ',' separated, a quoted field may hold '"' (as "") and newlines. A line with the wrong field count stops it. */
+static int rec(FILE *f, int csv, char **buf, size_t *cap, size_t *off, int nf) { /* one record's fields into buf */
+  size_t n = 0;
+  int c, inq = 0, k = 0, any = 0;
+  off[0] = 0;
+  while ((c = getc(f)) != EOF) {
+    any = 1;
+    if (n + 2 >= *cap) *buf = realloc(*buf, *cap *= 2);
+    if (csv && inq) {
+      if (c == '"') {
+        int d = getc(f);
+        if (d == '"') (*buf)[n++] = '"';
+        else {
+          inq = 0;
+          if (d != EOF) ungetc(d, f);
+        }
+      } else (*buf)[n++] = (char)c;
+      continue;
+    }
+    if (csv && c == '"') {
+      inq = 1;
+      continue;
+    }
+    if (c == '\r') continue;
+    if (c == '\n') break;
+    if (c == (csv ? ',' : '|')) {
+      (*buf)[n++] = 0;
+      if (++k < nf + 1) off[k] = n;
+      continue;
+    }
+    (*buf)[n++] = (char)c;
+  }
+  if (!any) return -1;
+  (*buf)[n] = 0;
+  if (!csv && n && off[k] == n && k == nf) return k; /* (a trailing '|': its empty last field isn't a field) */
+  return k + 1;
+}
+static int load(const char *table, const char *file, const char *fmt) {
+  int csv = !strcmp(fmt, "csv");
+  if (!csv && strcmp(fmt, "tbl")) {
+    fprintf(stderr, "sqlgauntlet: load: format %s: tbl or csv\n", fmt);
+    return 2;
+  }
+  char sql[1024];
+  snprintf(sql, sizeof sql, "SELECT * FROM %s", table);
+  sg_stmt *st = B->prepare(db, sql, err, sizeof err);
+  if (!st) {
+    fprintf(stderr, "sqlgauntlet: load: %s: %s\n", table, err);
+    return 1;
+  }
+  int nc = B->column_count(st);
+  B->finalize(st);
+  size_t len = (size_t)snprintf(sql, sizeof sql, "INSERT INTO %s VALUES (?", table);
+  for (int i = 1; i < nc && len < sizeof sql - 4; i++) len += (size_t)snprintf(sql + len, sizeof sql - len, ", ?");
+  snprintf(sql + len, sizeof sql - len, ")");
+  sg_stmt *ins = B->prepare(db, sql, err, sizeof err);
+  FILE *f = fopen(file, "rb");
+  if (!ins || !f) {
+    fprintf(stderr, "sqlgauntlet: load: %s: %s\n", ins ? file : sql, ins ? "cannot open" : err);
+    return 1;
+  }
+  size_t cap = 1 << 16, *off = malloc(sizeof *off * (size_t)(nc + 2));
+  char *buf = malloc(cap);
+  long rows = 0;
+  int k, rc = 0;
+  if (B->exec(db, "BEGIN", err, sizeof err)) fprintf(stderr, "sqlgauntlet: load: BEGIN: %s\n", err);
+  while ((k = rec(f, csv, &buf, &cap, off, nc)) >= 0) {
+    if (k == 1 && !buf[0]) continue; /* (an empty line) */
+    if (k != nc) {
+      fprintf(stderr, "sqlgauntlet: load: %s: record %ld has %d fields, %s has %d columns\n", file, rows + 1, k, table, nc);
+      rc = 1;
+      break;
+    }
+    for (int i = 0; i < nc; i++) {
+      sg_value v = { SG_TEXT, 0, 0, buf + off[i], strlen(buf + off[i]) };
+      B->bind(ins, i + 1, &v);
+    }
+    if (B->step(ins) != SG_DONE) {
+      fprintf(stderr, "sqlgauntlet: load: %s: record %ld: %s\n", file, rows + 1, B->errmsg(db));
+      rc = 1;
+      break;
+    }
+    B->reset(ins);
+    rows++;
+  }
+  if (B->exec(db, rc ? "ROLLBACK" : "COMMIT", err, sizeof err)) fprintf(stderr, "sqlgauntlet: load: COMMIT: %s\n", err);
+  B->finalize(ins);
+  fclose(f);
+  free(buf);
+  free(off);
+  fprintf(stderr, "sqlgauntlet: load: %s: %ld rows\n", table, rows);
+  return rc;
+}
 static int tagged(const Q *q, const char *tag) { /* tag is one of the statement's comma-separated tags */
   size_t n = strlen(tag);
   for (const char *t = q->tags; t && (t = strstr(t, tag)); t += n)
@@ -367,7 +478,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
     return 0;
   }
   if (argc < 4) {
-    fprintf(stderr, "usage: sqlgauntlet build|check|hot|prep|rows|info <db> <file> ...\n");
+    fprintf(stderr, "usage: sqlgauntlet build|load|check|hot|prep|rows|info <db> <file> ...\n");
     return 2;
   }
   const char *mode = argv[1];
@@ -377,6 +488,15 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
   if (!(db = B->open(argv[2], err, sizeof err))) {
     fprintf(stderr, "sqlgauntlet: open %s: %s\n", argv[2], err);
     return 2;
+  }
+  if (!strcmp(mode, "load")) {
+    if (argc < 6) {
+      fprintf(stderr, "usage: sqlgauntlet load <db> <table> <file> <tbl|csv>\n");
+      return 2;
+    }
+    int rc = load(argv[3], argv[4], argv[5]);
+    B->close(db);
+    return rc;
   }
   if (!strcmp(mode, "build")) {
     char *sql = slurp(argv[3]);
@@ -512,6 +632,13 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         double sum = 0;
         for (int k = 0; k < nt; k++) sum += t[k];
         long long ins = perf_read(0), cyc = perf_read(1);
+#ifdef SG_CALLGRIND
+        {
+          char lb[300];
+          snprintf(lb, sizeof lb, "%s %s %d", q->id, hot ? "hot" : "prep", nt);
+          CALLGRIND_DUMP_STATS_AT(lb);
+        }
+#endif
         qsort(t, (size_t)nt, sizeof *t, cmpd);
         clean(r0.err);
         printf("T\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first, nt ? sum / nt : first,

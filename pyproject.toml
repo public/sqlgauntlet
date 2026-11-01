@@ -27,5 +27,8 @@ target-version = "py39"
 select = ["E", "F", "W", "B", "I", "UP"]
 ignore = ["E701", "E702", "E731", "E741", "B023"]   # (one-line compound statements and short lambdas are the house style)
 
+[tool.ruff.lint.per-file-ignores]
+"workloads/speedtest1/instrument.py" = ["E501"]   # (exact anchors in speedtest1.c)
+
 [tool.ruff.format]
 quote-style = "preserve"

@@ -1,7 +1,8 @@
 """prep: a corpus directory (projects/<p>/{meta.json,schema.sql,data.sql,queries.sql} and manifest.jsonl, the layout of
 corpus/README.md) as the driver's flat files, one pair per project:
   <p>.build.sql   the database: journal_mode OFF, temp _cfg(scale), schema.sql, data.sql, ANALYZE unless meta.json says
-                  "analyze": false
+                  "analyze": false; with a load.tsv (big data files: workloads/), <p>.load.tsv (table, absolute path,
+                  tbl|csv) for the driver's load and <p>.post.sql (post.sql, then ANALYZE) after it
   <p>.q           meta.json's "pragmas" (@@X), then each statement: @@Q <id> <ordered> <write> <tags>, its @@P
                   parameters, its SQL
 ordered = 1 when the statement has ORDER BY (rows compared in order, else as a multiset); write = 1 when it is not a
@@ -114,13 +115,16 @@ def prep(corpus, out, scale='1', projects=(), ids=None, wave='', heavy=False, di
         if not qs:
             continue
         meta = json.loads((pdir / 'meta.json').read_text())
-        build = (
-            f"PRAGMA journal_mode=OFF;\nCREATE TEMP TABLE _cfg AS SELECT {scale} AS scale;\n"
-            + (pdir / 'schema.sql').read_text()
-            + '\n'
-            + (pdir / 'data.sql').read_text()
-            + ('\nANALYZE;\n' if meta.get('analyze', True) else '\n')
-        )
+        data = (pdir / 'data.sql').read_text() if (pdir / 'data.sql').exists() else ''
+        analyze = '\nANALYZE;\n' if meta.get('analyze', True) else '\n'
+        loads = [line.split('\t') for line in (pdir / 'load.tsv').read_text().splitlines() if line.strip()] if (pdir / 'load.tsv').exists() else []
+        build = f"PRAGMA journal_mode=OFF;\nCREATE TEMP TABLE _cfg AS SELECT {scale} AS scale;\n" + (pdir / 'schema.sql').read_text() + '\n' + data
+        if loads:  # (data files through the driver's load, then post.sql and ANALYZE: run.py's build)
+            post = ((pdir / 'post.sql').read_text() if (pdir / 'post.sql').exists() else '') + analyze
+            _put(out / f'{p}.load.tsv', ''.join(f'{t}\t{(pdir / f).resolve()}\t{fmt}\n' for t, f, fmt in loads))
+            _put(out / f'{p}.post.sql', tr.script(p, post) if tr else post)
+        else:
+            build += analyze
         f = [f"@@X {x.rstrip(';')};\n" for x in meta.get('pragmas', [])]
         skipped = []
         for q in qs:

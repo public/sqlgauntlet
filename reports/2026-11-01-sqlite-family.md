@@ -4,7 +4,7 @@
 - **Machine:** Apple M-series, macOS. It was shared with other work, at load average 12–19.
 - **Backends:**
   - `sqlite`: SQLite 3.54.1;
-  - `turbo`: cursed-sqlite-turbo at 9a37463 (`contrib/turbo`, `QC_SERVE=1`);
+  - `turbo`: cursed-sqlite-turbo at 9a37463, a SQLite-API build (`make sqlite-api`, `QC_SERVE=1`);
   - `libsql`: libSQL 0.2.3, which is SQLite 3.47.0.
 - **Build:** every backend was built with the same options (`backends/sqlite/backend.mk`).
 

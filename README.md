@@ -10,7 +10,7 @@ warm-up measured separately from steady state.
 | `sqlite` | SQLite 3.54.1 | built by `make backends` |
 | `libsql` | libSQL 0.2.3 (a SQLite 3.47.0 fork), its bundled amalgamation | built by `make backends` |
 | `turso` | Turso 0.8.3 (a Rust rewrite of SQLite's engine), over its C ABI | adapter written; `sh backends/turso/fetch.sh build` needs Rust |
-| any SQLite-API library | a fork or a patched build: `make sqlite-api NAME=<n> SRC=<dir>` | `contrib/turbo/` is an example |
+| any SQLite-API library | a fork or a patched build: `make sqlite-api NAME=<n> SRC=<dir>` | built from your tree |
 | DuckDB, PostgreSQL, MySQL | other dialects, through `dialect.py` | interface only (below) |
 
 ## Quick start
@@ -81,6 +81,7 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 | mode | what | lines |
 |---|---|---|
 | `build` | the app's database from its build script | |
+| `load` | a data file (`tbl` or `csv`) into a table, through the backend's prepare and bind, every field as text | |
 | `check` | each statement 8 times: 6 on one handle, then 2 freshly prepared; the runs must agree with each other | `C id status rows changes hash msethash alt/runs error`, `N id nhash nmsethash` |
 | `hot` | prepared once, then 1 + reps executions (reset between), until `budget-ms` is spent | `T id rows hash first-ms median-ms mean-ms runs instr cycles alt/runs error` |
 | `prep` | every execution prepares, binds, steps and finalizes | the same T line |
@@ -93,6 +94,9 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 - **Counters:** on Linux, user-mode instructions and cycles come from `perf_event_open` over the timed spans
   (`perf_event_paranoid ≤ 2`); elsewhere they are -1.
 - **E lines:** `SG_EXEC=1` prints one per execution: `E id k alt ms instr cycles engine-ms`.
+- **Callgrind:** `make callgrind` builds the CLI with `-DSG_CALLGRIND`. `sqlgauntlet-run speed --callgrind` then counts
+  instructions under valgrind, collecting only around the timed spans, and dumping once per statement and mode. The
+  counts are deterministic on any Linux, so they can measure statements too short to time.
 
 ### Correctness: normalisation and verdicts (`python/sqlgauntlet/compare.py`)
 
@@ -161,6 +165,25 @@ Untranslatable statements go to `<app>.untranslated.tsv` and are counted by comp
 and data scripts go through the same path per app. This is the layer DuckDB, PostgreSQL and MySQL need. They are not
 done: a DuckDB adapter over its C API (prepared statements, result chunks) is the next step.
 
+## Workloads (`workloads/`)
+
+Standard benchmarks and fuzzers. Each one pins its inputs by commit and checksum, and downloads or builds what it
+can't redistribute.
+
+| workload | what | runs on |
+|---|---|---|
+| `tpch/make.py [SF]` | TPC-H at scale factor SF (default 0.1). dbgen comes from tpch-kit at a pinned commit, built here. There are two projects: the 22 queries, and small statements (point lookups, short ranges) where per-execution overhead dominates | any backend, as a corpus |
+| `clickbench/make.py [rows]` | ClickBench's 43 queries on a checksummed prefix of its dataset (default 1M rows; only the prefix is downloaded), loaded as ClickBench loads SQLite | any backend, as a corpus |
+| `speedtest1/run.py <arm>...` | SQLite's own benchmark (`test/speedtest1.c` from the pinned source tree), linked with each backend's own `sqlite3.c` and compile line. Arms are interleaved and verification hashes compared | SQLite-API backends |
+| `sqlancer/` | SQLancer campaigns (NoREC, query partitioning, PQS) through sqlite-jdbc rebuilt from each backend's `sqlite3.c`, with `repro.sh` and `reduce.py` to replay and shrink what it finds | SQLite-API backends; needs a JDK and Maven |
+
+- **TPC-H and ClickBench** produce corpus directories (`build/workloads/<name>`) that `sqlgauntlet-run --corpus` takes.
+  Their data loads through the driver's `load`, then `post.sql` (indexes, ANALYZE). Their queries are tagged with
+  their shape class from `classes.tsv` (point, range, agg, join, subquery, topn, …), so summarise reports results by
+  shape.
+- **speedtest1 and SQLancer** find each SQLite-API backend's sources through `build/backends/<name>.src`, which
+  `make sqlite` and `make sqlite-api` record.
+
 ## Using sqlgauntlet from another project
 
 sqlgauntlet is meant to be depended on, not copied:
@@ -176,8 +199,6 @@ sqlgauntlet is meant to be depended on, not copied:
 - **Your own harness, as a reference:** `--arm ref=exe:path/to/program`. Anything with the driver's command line and
   output lines is an arm. `tools/identity.py` then checks that two arms give identical lines.
 
-`contrib/turbo/` shows all of this for one engine kept in its own repository.
-
 ## Layout
 
 ```
@@ -186,10 +207,9 @@ src/                    driver.c (libsqlgauntlet.a), main.c (the CLI)
 backends/<name>/        adapter.c, fetch.sh (pinned sources), backend.mk; sqlite also has regexp.c (SQLite's, public domain)
 python/sqlgauntlet/     prep, dialect, run, compare, summarise
 corpus/                 the corpus (README.md), licences.tsv, UPSTREAM, fetch.sh, tools/ (authoring: run, index, time)
-contrib/turbo/          cursed-sqlite-turbo from a pinned commit (turbo, turbo-serve, turbo-diff) and its imported
-                        apparatus: corpus harness, speedtest1, TPC-H, ClickBench, SQLancer, broker payloads
+workloads/              TPC-H, ClickBench (as corpora), speedtest1, SQLancer; classes.tsv (query shapes), common.py
 tools/                  corpus-split.py, identity.py, check-corpus.py
-tests/                  smoke.py (make test)
+tests/                  smoke.py, workloads.py (make test)
 ```
 
 Licence: MIT (`LICENSE`). The corpus's quoted SQL keeps each application's licence (corpus/README.md).

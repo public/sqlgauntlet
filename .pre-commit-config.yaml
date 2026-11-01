@@ -1,6 +1,6 @@
 # pre-commit install  (or: uvx pre-commit run --all-files)
-# (imported files keep their bytes: contrib/turbo/PROVENANCE.md)
-exclude: ^(contrib/turbo/(bench|sqlancer|explorer)/|contrib/turbo/BENCH\.md$|corpus/tools/|corpus/(INDEX|STATS|SURVEY)\.md$|corpus/scores\.json$)
+# (the corpus upstream's own files keep their bytes: docs/PROVENANCE.md)
+exclude: ^(corpus/tools/|corpus/(INDEX|STATS|SURVEY)\.md$|corpus/scores\.json$)
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0

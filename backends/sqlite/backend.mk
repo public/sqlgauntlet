@@ -6,13 +6,15 @@ SQLITE_OPTS := -DSQLITE_THREADSAFE=0 -DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_DEFAU
   -DSQLITE_OMIT_SHARED_CACHE -DSQLITE_ENABLE_MATH_FUNCTIONS -DSQLITE_ENABLE_FTS4 -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_PERCENTILE
 SQLITE_API_DEPS := backends/sqlite/adapter.c backends/sqlite/regexp.c include/sqlgauntlet.h
 
-# sqlite_api_backend <name> <dir with sqlite3.c and sqlite3.h> <extra cflags> <env "K=V ...">
+# sqlite_api_backend <name> <dir with sqlite3.c and sqlite3.h> <extra cflags> <env "K=V ...">; <name>.src records the
+# directory, for the workloads that link SQLite's API themselves (speedtest1, SQLancer)
 define sqlite_api_backend
 	@mkdir -p $(B)/backends
 	$(CC) $(CFLAGS) $(SQLITE_OPTS) $(SO) -w -Iinclude -Ibackends/sqlite -I$(2) $(3) -DSG_NAME='"$(1)"' \
 	  backends/sqlite/adapter.c $(2)/sqlite3.c -o $(B)/backends/$(1).so -lm
 	echo "$(CC) $(CFLAGS) $(SQLITE_OPTS) $(3)" > $(B)/backends/$(1).so.cflags
 	$(call backend_json,$(1),sqlite,$(4))
+	cd $(2) && pwd > $(CURDIR)/$(B)/backends/$(1).src
 endef
 
 sqlite: $(B)/backends/sqlite.so

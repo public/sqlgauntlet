@@ -24,6 +24,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import cg
 from . import prep as P
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,10 +60,9 @@ class Arm:
         e.update(extra or {})
         return e
 
-    def run(self, args, out=None, extra=None, timeout=1800):
-        r = subprocess.run(
-            self.cmd + [str(a) for a in args], stdout=out or subprocess.PIPE, stderr=subprocess.PIPE, env=self.environ(extra), timeout=timeout, text=True
-        )
+    def run(self, args, out=None, extra=None, timeout=1800, wrap=(), driver=None):
+        cmd = list(wrap) + ([driver] + self.cmd[1:] if driver and self.kind == 'so' else self.cmd) + [str(a) for a in args]
+        r = subprocess.run(cmd, stdout=out or subprocess.PIPE, stderr=subprocess.PIPE, env=self.environ(extra), timeout=timeout, text=True)
         if r.returncode:
             print(f'sqlgauntlet-run: {self.name} {args[0]} {Path(str(args[-1])).name}: exit {r.returncode}: {r.stderr.strip()[-300:]}', file=sys.stderr)
         return r
@@ -134,6 +134,7 @@ def main(argv=None):
     a.add_argument('--budget', type=float, default=60)
     a.add_argument('--modes', default='hot,prep')
     a.add_argument('--exec-lines', action='store_true')
+    a.add_argument('--callgrind', action='store_true', help='speed: instructions from valgrind (make callgrind; so arms)')
     a.add_argument('--scale', default='1')
     a.add_argument('--ids')
     a.add_argument('--wave', default='')
@@ -162,7 +163,21 @@ def main(argv=None):
         db, bs = d / f'{p}.db', q / f'{p}.build.sql'
         if not db.exists() or db.stat().st_mtime < bs.stat().st_mtime:
             db.unlink(missing_ok=True)
-            bw.run(['build', db, bs])
+            part = db.with_suffix('.db.part')
+            part.unlink(missing_ok=True)
+            ok = bw.run(['build', part, bs]).returncode == 0
+            lt, ps = q / f'{p}.load.tsv', q / f'{p}.post.sql'
+            if ok and lt.exists():  # (a workload's data files, then its indexes and ANALYZE)
+                for line in lt.read_text().splitlines():
+                    t, f, fmt = line.split('\t')
+                    ok = ok and bw.run(['load', part, t, f, fmt], timeout=7200).returncode == 0
+                ok = ok and bw.run(['build', part, ps], timeout=7200).returncode == 0
+            if ok:
+                part.rename(db)
+    unbuilt = [p for p in projects if not (d / f'{p}.db').exists()]
+    if unbuilt:  # (their statements show as missing in compare's report)
+        print(f'sqlgauntlet-run: not built, skipped: {", ".join(unbuilt)}', file=sys.stderr)
+        projects = [p for p in projects if p not in unbuilt]
     env = environment(arms, o.corpus)
     env.update(
         mode=o.mode,
@@ -194,6 +209,9 @@ def main(argv=None):
             for f in list(out.glob('*.hot.*.tsv')) + list(out.glob('*.prep.*.tsv')):
                 f.unlink()
         modes = o.modes.split(',')
+        cgdriver = str(ROOT / 'build' / 'callgrind' / 'sqlgauntlet')
+        if o.callgrind and not os.path.exists(cgdriver):
+            sys.exit('sqlgauntlet-run: --callgrind needs make callgrind (Linux, valgrind)')
         extra = {'SG_EXEC': '1'} if o.exec_lines else {}
         files = {}
         for r in range(o.r0, o.r0 + o.rounds):
@@ -207,7 +225,19 @@ def main(argv=None):
                 for arm in order:
                     shutil.copyfile(d / f'{p}.db', c)  # (one copy per project, arm and round: writes roll back)
                     for m in modes:
-                        arm.run([m, c, q / f'{p}.q', o.reps, o.budget], out=files[arm.name, m, r], extra=extra)
+                        if o.callgrind and arm.kind == 'so':  # (deterministic instructions; times are valgrind's)
+                            for f in tmp.glob('cg.*'):
+                                f.unlink()
+                            res = arm.run(
+                                [m, c, q / f'{p}.q', o.reps, o.budget],
+                                extra=extra,
+                                timeout=7200,
+                                wrap=cg.VALGRIND + [f'--callgrind-out-file={tmp}/cg.%p'],
+                                driver=cgdriver,
+                            )
+                            files[arm.name, m, r].writelines(cg.apply(res.stdout.splitlines(), sorted(tmp.glob('cg.*'))))
+                        else:
+                            arm.run([m, c, q / f'{p}.q', o.reps, o.budget], out=files[arm.name, m, r], extra=extra)
             for f in files.values():
                 f.close()
             files.clear()
