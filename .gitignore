@@ -1,0 +1,9 @@
+build/
+third_party/sqlite/
+third_party/libsql/
+third_party/turso/
+corpus/fetched/
+__pycache__/
+*.egg-info/
+*.db
+*.log
