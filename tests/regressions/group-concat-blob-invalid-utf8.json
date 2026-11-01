@@ -1,0 +1,9 @@
+{
+ "found": "2026-11-01, fuzz/props.py test_differential (Hypothesis), minimised by its shrinking",
+ "what": "group_concat over a blob that isn't valid UTF-8: SQLite passes the bytes through as text (x'80')",
+ "schema": ["CREATE TABLE t0(c0, c1)"],
+ "data": ["INSERT INTO t0 VALUES (NULL, x'80')"],
+ "sql": "SELECT t0.c1, group_concat(t0.c1) FROM t0 GROUP BY t0.c1",
+ "params": [],
+ "expect": {"turso": "differs: Turso replaces the byte with U+FFFD (ef bf bd); not yet reported upstream"}
+}

@@ -213,6 +213,22 @@ can't redistribute.
 - **speedtest1 and SQLancer** find each SQLite-API backend's sources through `build/backends/<name>.src`, which
   `make sqlite` and `make sqlite-api` record.
 
+## Fuzzing (`python/sqlgauntlet/fuzz/`, `fuzz/`, `tests/regressions/`)
+
+Four layers, each running every backend through the same backend table, so that turbo, SQLite, libSQL and Turso are
+checked the same way. Keep runs small while iterating (the defaults); long sweeps are for the end, or a box.
+
+| layer | run | what it checks | doesn't cover |
+|---|---|---|---|
+| Hypothesis properties (`fuzz/props.py`, `fuzz/strategies.py`) | `cd python && ../build/venv/bin/python -m pytest sqlgauntlet/fuzz/props.py` (`SG_FUZZ_BACKENDS`, `SG_FUZZ_PROFILE=full` for 2,000 examples a property) | generated schemas (every affinity, WITHOUT ROWID, partial and expression indexes), awkward data (int64 edges, -0.0, huge doubles, long and non-UTF-8 text, NULLs) and queries (joins, GROUP BY, windows, CTEs, LIKE/GLOB, ORDER BY…LIMIT, parameters); oracles: against SQLite, TLP, NoREC, an index on every column + ANALYZE, 8 hot and 3 fresh runs (an adaptive engine's switches), bound against inlined parameters | writes; statements outside its grammar; non-SQLite dialects |
+| corpus mutation (`fuzz/mutate.py`) | `python -m sqlgauntlet.fuzz.mutate corpus build/fuzz/mutated [apps] --per N --seed S`, then `sqlgauntlet-run check --corpus build/fuzz/mutated --arm sqlite --arm <b>` | the real apps' read statements with literals, LIMIT/OFFSET, WHERE (negated, or padded with a term that mustn't change the rows) and DISTINCT varied, on each app's own schema and data | writes; new joins or subqueries |
+| libFuzzer (`fuzz/sqlfuzz.c`) | `sh tools/fuzz-libfuzzer.sh <backend> [seconds] [jobs]` (Docker) | crashes, hangs and ASan/UBSan reports in a SQLite-API engine on arbitrary statement text, seeded with the corpus | wrong results (no oracle); Turso and PostgreSQL (not SQLite-API) |
+| regressions (`tests/regressions/*.json`, `tests/regressions.py`, in `make test`) | `python3 tests/regressions.py [backends]` | every confirmed finding, minimised, with its seed and per-backend expectation: `same`, or `differs: <why>` for a known difference, so a fix shows up | |
+
+A differential failure is saved to `build/fuzz/failures/` (the newest of an oracle's is Hypothesis's shrunk example).
+`tools/fuzz-reduce.py <failure.json>` minimises it further into a regression case. A backend bug goes to its own
+repository: turbo's to the sqlite-jit session as a draft PR on turbo.
+
 ## Using sqlgauntlet from another project
 
 sqlgauntlet is meant to be depended on, not copied:

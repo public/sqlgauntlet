@@ -44,6 +44,7 @@ include $(filter-out backends/sqlite/backend.mk,$(wildcard backends/*/backend.mk
 test: all sqlite libsql
 	python3 tests/smoke.py
 	python3 tests/workloads.py
+	python3 tests/regressions.py
 # make test-postgres: tests/postgres.py (a PostgreSQL server at PG_URL, and sqlglot)
 test-postgres: all sqlite postgres
 	python3 tests/postgres.py
