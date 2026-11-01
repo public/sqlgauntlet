@@ -53,6 +53,8 @@ class Arm:
         if not os.path.exists(self.path):
             sys.exit(f'sqlgauntlet-run: arm {name}: {self.path} not found (make {Path(self.path).stem}?)')
         self.cmd = [driver, '--backend', self.path] if kind == 'so' else [self.path]
+        j = Path(self.path).with_suffix('.json')
+        self.dialect = json.loads(j.read_text()).get('dialect', 'sqlite') if kind == 'so' and j.exists() else 'sqlite'
 
     def environ(self, extra=None):
         e = {k: v for k, v in os.environ.items() if k not in ARM_VARS}
@@ -117,6 +119,30 @@ def environment(arms, corpus):
     }
 
 
+def build_db(arm, db, bs, lt, ps, tmp, blocks=False):
+    """db from the build script bs, then the data files in lt (table, file, format) and the script ps; the file appears
+    only when every step succeeded. blocks: ps holds statements in blocks ending '-- end', each run on its own (one
+    that fails is reported, the rest still run)"""
+    db.unlink(missing_ok=True)
+    part = db.with_suffix('.db.part')
+    part.unlink(missing_ok=True)
+    ok = arm.run(['build', part, bs]).returncode == 0
+    if ok and lt.exists():  # (a workload's or an export's data files, then indexes, views and ANALYZE)
+        for line in lt.read_text().splitlines():
+            t, f, fmt = line.split('\t')
+            ok = ok and arm.run(['load', part, t, f, fmt], timeout=7200).returncode == 0
+        if ok and ps.exists() and blocks:
+            for b in ps.read_text().split('\n-- end\n'):
+                if b.strip() and not all(x.startswith('--') for x in b.strip().splitlines()):
+                    (tmp / 'post.sql').write_text(b)
+                    arm.run(['build', part, tmp / 'post.sql'], timeout=7200)
+        elif ok and ps.exists():
+            ok = arm.run(['build', part, ps], timeout=7200).returncode == 0
+    if ok:
+        part.rename(db)
+    return ok
+
+
 def main(argv=None):
     import argparse
 
@@ -156,25 +182,33 @@ def main(argv=None):
         shutil.rmtree(q, ignore_errors=True)
     P.prep(o.corpus, q, o.scale, o.projects, ids, o.wave, o.heavy)
     projects = sorted(p.name[:-2] for p in q.glob('*.q'))
-    bw = next((x for x in arms if x.name == o.build_with), arms[0]) if o.build_with else arms[0]
-    if bw.kind == 'exe':
-        bw = Arm('sqlite', o.driver)  # (a foreign program may not build: SQLite does)
+    sq = [x for x in arms if x.dialect == 'sqlite' and x.kind == 'so']
+    bw = next((x for x in arms if x.name == o.build_with), None) if o.build_with else (sq[0] if sq else None)
+    if bw is None or bw.kind == 'exe' or bw.dialect != 'sqlite':
+        bw = Arm('sqlite', o.driver)  # (the reference build: every other dialect's data is exported from it)
     for p in projects:
         db, bs = d / f'{p}.db', q / f'{p}.build.sql'
         if not db.exists() or db.stat().st_mtime < bs.stat().st_mtime:
-            db.unlink(missing_ok=True)
-            part = db.with_suffix('.db.part')
-            part.unlink(missing_ok=True)
-            ok = bw.run(['build', part, bs]).returncode == 0
-            lt, ps = q / f'{p}.load.tsv', q / f'{p}.post.sql'
-            if ok and lt.exists():  # (a workload's data files, then its indexes and ANALYZE)
-                for line in lt.read_text().splitlines():
-                    t, f, fmt = line.split('\t')
-                    ok = ok and bw.run(['load', part, t, f, fmt], timeout=7200).returncode == 0
-                ok = ok and bw.run(['build', part, ps], timeout=7200).returncode == 0
-            if ok:
-                part.rename(db)
-    unbuilt = [p for p in projects if not (d / f'{p}.db').exists()]
+            build_db(bw, db, bs, q / f'{p}.load.tsv', q / f'{p}.post.sql', tmp)
+    dirs = {'sqlite': (q, d)}
+    for dl in sorted({x.dialect for x in arms} - {'sqlite'}):  # (another dialect: its statements translated, its data exported)
+        from . import export as X
+
+        qd, dd = out / f'q-{dl}', out / f'db-{dl}'
+        dd.mkdir(parents=True, exist_ok=True)
+        if ids is not None:
+            shutil.rmtree(qd, ignore_errors=True)
+        P.prep(o.corpus, qd, o.scale, o.projects, ids, o.wave, o.heavy, dialect=dl)
+        builder = next(x for x in arms if x.dialect == dl)
+        for p in projects:
+            db = dd / f'{p}.db'
+            newer = max((d / f'{p}.db').stat().st_mtime, Path(X.__file__).stat().st_mtime) if (d / f'{p}.db').exists() else None
+            if newer and (not db.exists() or db.stat().st_mtime < newer):  # (re-exported when the reference or export.py changed)
+                for note in X.export(d / f'{p}.db', qd, p, dl):
+                    print(f'sqlgauntlet-run: export {dl}: {note}', file=sys.stderr)
+                build_db(builder, db, qd / f'{p}.build.sql', qd / f'{p}.load.tsv', qd / f'{p}.post.sql', tmp, blocks=True)
+        dirs[dl] = (qd, dd)
+    unbuilt = [p for p in projects if not all((dd / f'{p}.db').exists() for _, dd in dirs.values())]
     if unbuilt:  # (their statements show as missing in compare's report)
         print(f'sqlgauntlet-run: not built, skipped: {", ".join(unbuilt)}', file=sys.stderr)
         projects = [p for p in projects if p not in unbuilt]
@@ -196,9 +230,10 @@ def main(argv=None):
         for arm in arms:
             t0 = time.time()
             with open(out / f'{arm.name}.check.tsv', 'w') as f:
+                qa, da = dirs[arm.dialect]
                 for p in projects:
-                    shutil.copyfile(d / f'{p}.db', c)
-                    arm.run(['check', c, q / f'{p}.q'], out=f)
+                    shutil.copyfile(da / f'{p}.db', c)
+                    arm.run(['check', c, qa / f'{p}.q'], out=f)
             n = sum(1 for l in open(out / f'{arm.name}.check.tsv') if l.startswith('C'))
             print(
                 f'sqlgauntlet-run check: {arm.name}: {n} statements, {time.time() - t0:.0f} s',
@@ -223,13 +258,14 @@ def main(argv=None):
                 n = len(arms)
                 order = [arms[(j + r + k) % n] for j in range(n)]
                 for arm in order:
-                    shutil.copyfile(d / f'{p}.db', c)  # (one copy per project, arm and round: writes roll back)
+                    qa, da = dirs[arm.dialect]
+                    shutil.copyfile(da / f'{p}.db', c)  # (one copy per project, arm and round: writes roll back)
                     for m in modes:
                         if o.callgrind and arm.kind == 'so':  # (deterministic instructions; times are valgrind's)
                             for f in tmp.glob('cg.*'):
                                 f.unlink()
                             res = arm.run(
-                                [m, c, q / f'{p}.q', o.reps, o.budget],
+                                [m, c, qa / f'{p}.q', o.reps, o.budget],
                                 extra=extra,
                                 timeout=7200,
                                 wrap=cg.VALGRIND + [f'--callgrind-out-file={tmp}/cg.%p'],
@@ -237,7 +273,7 @@ def main(argv=None):
                             )
                             files[arm.name, m, r].writelines(cg.apply(res.stdout.splitlines(), sorted(tmp.glob('cg.*'))))
                         else:
-                            arm.run([m, c, q / f'{p}.q', o.reps, o.budget], out=files[arm.name, m, r], extra=extra)
+                            arm.run([m, c, qa / f'{p}.q', o.reps, o.budget], out=files[arm.name, m, r], extra=extra)
             for f in files.values():
                 f.close()
             files.clear()

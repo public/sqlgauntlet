@@ -9,9 +9,10 @@ warm-up measured separately from steady state.
 |---|---|---|
 | `sqlite` | SQLite 3.54.1 | built by `make backends` |
 | `libsql` | libSQL 0.2.3 (a SQLite 3.47.0 fork), its bundled amalgamation | built by `make backends` |
-| `turso` | Turso 0.8.3 (a Rust rewrite of SQLite's engine), over its C ABI | adapter written; `sh backends/turso/fetch.sh build` needs Rust |
+| `turso` | Turso 0.8.3 (a Rust rewrite of SQLite's engine), over its C ABI (`sdk-kit`) | `sh backends/turso/fetch.sh build` (Rust), then `make turso` |
+| `postgres` | PostgreSQL, a client over libpq; statements translated by sqlglot, data exported from the SQLite build | `make postgres PG_URL=…` (libpq, `pip install sqlglot`); `backends/postgres/server.sh` starts a throwaway server in Docker |
 | any SQLite-API library | a fork or a patched build: `make sqlite-api NAME=<n> SRC=<dir>` | built from your tree |
-| DuckDB, PostgreSQL, MySQL | other dialects, through `dialect.py` | interface only (below) |
+| DuckDB, MySQL | other dialects, through the same dialect layer | not yet |
 
 ## Quick start
 
@@ -81,7 +82,7 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 | mode | what | lines |
 |---|---|---|
 | `build` | the app's database from its build script | |
-| `load` | a data file (`tbl` or `csv`) into a table, through the backend's prepare and bind, every field as text | |
+| `load` | a data file (`tbl`, `csv`, or `csvn`, where an unquoted `\N` is NULL) into a table, through the backend's prepare and bind, every field as text | |
 | `check` | each statement 8 times: 6 on one handle, then 2 freshly prepared; the runs must agree with each other | `C id status rows changes hash msethash alt/runs error`, `N id nhash nmsethash` |
 | `hot` | prepared once, then 1 + reps executions (reset between), until `budget-ms` is spent | `T id rows hash first-ms median-ms mean-ms runs instr cycles alt/runs error` |
 | `prep` | every execution prepares, binds, steps and finalizes | the same T line |
@@ -156,14 +157,38 @@ The report lists:
 
 ### Dialects (`python/sqlgauntlet/dialect.py`)
 
-The corpus is in SQLite's dialect. A backend's `dialect` picks how its text is made:
+The corpus is in SQLite's dialect. A backend's `dialect` (in its `.json`) picks how its statements are made:
 1. a reviewed override in `corpus/dialects/<dialect>.jsonl`, either `{"id", "sql"}` or `{"id", "untranslatable": why}`;
 2. otherwise sqlglot (`pip install sqlglot`), with unsupported constructs raising;
 3. otherwise the statement is untranslatable.
 
-Untranslatable statements go to `<app>.untranslated.tsv` and are counted by compare, never dropped silently. Schemas
-and data scripts go through the same path per app. This is the layer DuckDB, PostgreSQL and MySQL need. They are not
-done: a DuckDB adapter over its C API (prepared statements, result chunks) is the next step.
+How the text is made:
+- **Parameters:** SQLite's `?N`, `?`, `:name`, `@name` and `$name` are swapped for markers before translation. They
+  come back in the dialect's numbered form (`$1…`), with the statement's parameter list renumbered to match.
+- **Identifiers** are lowercased and quoted on both sides (SQLite's are case-insensitive), so names like `user` work.
+- **Untranslatable statements** go to `<app>.untranslated.tsv` and are counted by compare, never dropped silently.
+
+**The same data on every engine.** The corpus's data generators are SQLite SQL, so they aren't translated. Each app's
+database is built by the SQLite reference, then exported for the other dialect (`python/sqlgauntlet/export.py`):
+- **Tables:** each column is typed from both its declared type and the values it actually holds, and primary keys
+  are kept. Rowid keys become identity columns.
+- **Data:** each table is written as a CSV and loaded through the driver's `load`.
+- **Indexes and views:** translated one by one, with inline `UNIQUE` constraints kept so upserts still work. One
+  that fails is reported and the rest still run.
+- **Left out:** FTS and R-tree tables, which are SQLite features.
+
+The runner keeps each dialect's statements and databases apart (`q-<dialect>/`, `db-<dialect>/`). compare holds
+every arm to the SQLite reference.
+
+**What a run against PostgreSQL shows:** sqlglot's translation is mechanical. Statements using SQLite idioms it
+doesn't map fail on PostgreSQL, or compute something else:
+- `INSERT OR IGNORE`, `GLOB`, `strftime`;
+- JSON functions on text columns;
+- `COLLATE NOCASE`;
+- a parenthesised table in `FROM`.
+
+Some also hit PostgreSQL's stricter grouping. compare reports each one with its message, so you can tell translation
+gaps from engine differences. Reviewed overrides in `corpus/dialects/postgres.jsonl` are how coverage grows.
 
 ## Workloads (`workloads/`)
 

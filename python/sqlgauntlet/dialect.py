@@ -4,11 +4,48 @@
   2. sqlglot's transpiler (read="sqlite", write=<dialect>), when sqlglot is installed; a statement it rejects or only
      half-translates (unsupported warnings) is untranslatable with its message
   3. otherwise untranslatable: "no translator"
-The schema and data scripts go through the same path, by project: overrides {"project": ..., "script": ...}.
+Parameters: SQLite's ?N, ?, :name, @name and $name are swapped for markers sqlglot keeps as identifiers, and come back
+as the dialect's own numbered form ($1..$N for postgres), the statement's @@P list renumbered to match. sqlglot can
+translate a statement into something that runs but means something else (SQLite's date functions are the usual
+case): compare's verdicts against the SQLite reference are what tell. Schemas and data don't go through here: an app's
+database is exported from the SQLite reference build (export.py).
 Untranslatable statements are reported by compare as such, never dropped silently."""
 
 import json
+import re
 from pathlib import Path
+
+PARAM = re.compile(r"""'(?:[^']|'')*'|"(?:[^"]|"")*"|\?(\d+)|\?|(?<![:\w]):([A-Za-z_]\w*)|(?<![\w@])@([A-Za-z_]\w*)|(?<![\w$])\$([A-Za-z_]\w*)""")
+
+
+def number_params(sql):
+    """(sql with __sgpK__ markers, {SQLite parameter name: K}); quoted text is left alone"""
+    names, anon = {}, [0]
+
+    def sub(m):
+        t = m.group(0)
+        if t[0] in '\'"':
+            return t
+        if m.group(1):
+            name = '?' + m.group(1)
+        elif t == '?':
+            anon[0] += 1
+            name = f'?{anon[0]}'
+        else:
+            name = t
+        k = names.setdefault(name, len(names) + 1)
+        return f'__sgp{k}__'
+
+    return PARAM.sub(sub, sql), names
+
+
+def transpile(sg, sql, dialect):
+    """sqlglot's translation, every identifier lowercased and quoted (SQLite's names are case-insensitive; export.py
+    creates them the same way, so reserved words such as user work), and ON CONFLICT's target without the NULLS FIRST
+    that sqlglot adds to every column list it reads as an ordering"""
+    out = sg.transpile(sql, read='sqlite', write=dialect, unsupported_level=sg.ErrorLevel.RAISE, identify=True, normalize=True)
+    fix = lambda m: re.sub(r'\s+NULLS\s+(FIRST|LAST)', '', m.group(0))
+    return [re.sub(r'ON CONFLICT\s*\([^()]*\)', fix, x) for x in out]
 
 
 class Translator:
@@ -35,20 +72,22 @@ class Translator:
         if not self.sg:
             return None, 'no translator (pip install sqlglot)'
         try:
-            out = self.sg.transpile(sql, read='sqlite', write=self.dialect, unsupported_level=self.sg.ErrorLevel.RAISE)
+            out = transpile(self.sg, sql, self.dialect)
         except Exception as e:
             return None, f'sqlglot: {str(e).splitlines()[0][:160]}'
         return ';\n'.join(out) + ';', None
 
-    def statement(self, i, sql):
-        """(text, None) or (None, why)"""
+    def statement(self, i, sql, params=()):
+        """(text, params renamed for the dialect, None) or (None, None, why). params: [(SQLite name, literal)]"""
         o = self.over.get(i)
+        if o and 'untranslatable' in o:
+            return None, None, 'override: ' + o['untranslatable']
+        marked, names = number_params(o['sql'] if o else sql)
         if o:
-            return (o['sql'], None) if 'sql' in o else (None, 'override: ' + o['untranslatable'])
-        return self._glot(sql)
-
-    def script(self, project, sql):
-        if project in self.scripts:
-            return self.scripts[project]
-        t, why = self._glot(sql)
-        return t if t else f'-- untranslatable: {why}\n'
+            t, why = marked, None
+        else:
+            t, why = self._glot(marked)
+        if t is None:
+            return None, None, why
+        t = re.sub(r'"?__sgp(\d+)__"?', lambda m: f'${m.group(1)}', t, flags=re.I)
+        return t, [(f'${names[n]}', lit) for n, lit in params if n in names], None

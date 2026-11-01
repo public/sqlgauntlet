@@ -34,3 +34,25 @@ jobs:
         with:
           name: test-${{ matrix.os }}-${{ matrix.cc }}
           path: build/test/*.tsv
+  postgres:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y libpq-dev
+      - run: pip install sqlglot==30.27.0
+      - run: make test-postgres PG_URL=postgresql://postgres@127.0.0.1:5432
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-postgres
+          path: build/test-postgres/*.tsv

@@ -19,6 +19,7 @@ with the arms grouped by which ones agree with each other. Writes <dir>/disagree
 import collections
 import glob
 import os
+import re
 import sys
 
 ORDER = ('same', 'types', 'order', 'rows', 'rowcount', 'changes', 'error', 'ref-error', 'both-error', 'unstable', 'missing', 'untranslated')
@@ -34,7 +35,7 @@ def load_q(d):
                 tags[p[1]] = p[4].split(',')
                 app[p[1]] = os.path.basename(f)[:-2]
     untr = {}
-    for f in glob.glob(os.path.join(d, 'q', '*.untranslated.tsv')):
+    for f in glob.glob(os.path.join(d, 'q-*', '*.untranslated.tsv')):  # (another dialect's: run.py's q-<dialect>)
         for l in open(f):
             i, _, w = l.rstrip('\n').partition('\t')
             untr[i] = w
@@ -52,7 +53,7 @@ def load(d, arm):
     return r
 
 
-def verdict(s, a, ordered, wall):
+def verdict(s, a, ordered, wall, read=False):
     if a is None:
         return 'missing'
     if a['st'] == 'unstable':
@@ -66,7 +67,7 @@ def verdict(s, a, ordered, wall):
         return 'ref-error'
     if a['rows'] != s['rows']:
         return 'rowcount'
-    if a['ch'] != s['ch']:
+    if not read and a['ch'] != s['ch']:  # (after a read, an engine may still report its last write's count)
         return 'changes'
     if wall:
         return 'same'
@@ -97,7 +98,7 @@ def main(argv=None):
                 continue
             if i not in S:
                 continue
-            V[a][i] = verdict(S[i], R[a].get(i), ordered.get(i, False), 'wallclock' in tags.get(i, []))
+            V[a][i] = verdict(S[i], R[a].get(i), ordered.get(i, False), 'wallclock' in tags.get(i, []), 'read' in tags.get(i, []))
     print(f'## Correctness: {len(S)} statements, reference {ref}\n')
     bad = [i for i, x in S.items() if x['st'] != 'ok']
     print(
@@ -135,7 +136,7 @@ def main(argv=None):
         msgs = collections.Counter()
         for x in R[a].values():
             if x['st'] != 'ok':
-                m = x['err'].split(' [run')[0]
+                m = re.split(r'\s+LINE \d+:|\s+DETAIL:', x['err'].split(' [run')[0])[0]  # (the message, not where it struck)
                 for pre in ('prepare: ',):
                     m = m[len(pre) :] if m.startswith(pre) else m
                 msgs[m[:90]] += 1

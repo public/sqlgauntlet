@@ -17,6 +17,8 @@ fi
 rm -rf "$D" && mkdir -p "$D"
 tar xzf "$T" -C "$D" --strip-components 2 "tpch-kit-$C/dbgen"; rm -rf "$D/answers/../reference" "$D/check_answers"
 # (gcc 10+ defaults to -fno-common; dbgen defines globals in headers)
-make -C "$D" CC="${CC:-cc}" DATABASE=POSTGRESQL MACHINE=LINUX WORKLOAD=TPCH CFLAGS="-O2 -fcommon -DDBNAME=\\\"dss\\\" -DLINUX -DPOSTGRESQL -DTPCH -DRNG_TEST -D_FILE_OFFSET_BITS=64 -w" dbgen > "$D/make.log" 2>&1 || { tail -20 "$D/make.log"; exit 1; }
+# (macOS has no <malloc.h>: a one-line stand-in)
+X=; if [ "$(uname)" = Darwin ]; then mkdir -p "$D/compat"; echo '#include <stdlib.h>' > "$D/compat/malloc.h"; X="-I$D/compat"; fi
+make -C "$D" CC="${CC:-cc}" DATABASE=POSTGRESQL MACHINE=LINUX WORKLOAD=TPCH CFLAGS="-O2 $X -fcommon -DDBNAME=\\\"dss\\\" -DLINUX -DPOSTGRESQL -DTPCH -DRNG_TEST -D_FILE_OFFSET_BITS=64 -w" dbgen > "$D/make.log" 2>&1 || { tail -20 "$D/make.log"; exit 1; }
 echo "$C" > "$D/VERSION"
 echo "fetch-dbgen: $D/dbgen"

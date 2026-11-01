@@ -4,7 +4,9 @@
   shellcheck, and two local checks:
   - no file of a "fetch"-class corpus app is committed (`tools/check-corpus.py`);
   - no home-directory or temp paths.
-- **Tests:** `make test` builds the sqlite and libsql backends and runs `tests/smoke.py` over a few vendored apps.
+- **Tests:** `make test` builds the sqlite and libsql backends and runs `tests/smoke.py` over a few vendored apps and
+  `tests/workloads.py` over TPC-H's path. `make test-postgres PG_URL=…` runs `tests/postgres.py`; it needs a server,
+  for which `backends/postgres/server.sh` starts one in Docker, and sqlglot.
   `make lint` runs every hook over the tree. CI runs both on Linux (x86-64, arm64; gcc and clang) and macOS.
 - **A new backend:** `backends/<name>/` with its adapter (a table of `include/sqlgauntlet.h`'s functions, exported
   as `sqlgauntlet_backend_v1()`), a `fetch.sh` that pins its sources by commit or checksum, and a `backend.mk` that

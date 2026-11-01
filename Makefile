@@ -17,7 +17,7 @@ LDL := $(if $(filter Linux,$(UNAME)),-ldl,)
 
 all: $(B)/sqlgauntlet $(B)/libsqlgauntlet.a
 backends: sqlite libsql
-.PHONY: all backends clean test lint
+.PHONY: all backends clean test test-postgres lint
 
 $(B)/driver.o: src/driver.c include/sqlgauntlet.h
 	@mkdir -p $(B); $(CC) $(CFLAGS) -fPIC -Iinclude -c $< -o $@
@@ -43,6 +43,9 @@ include $(wildcard backends/*/backend.mk)
 test: all sqlite libsql
 	python3 tests/smoke.py
 	python3 tests/workloads.py
+# make test-postgres: tests/postgres.py (a PostgreSQL server at PG_URL, and sqlglot)
+test-postgres: all sqlite postgres
+	python3 tests/postgres.py
 lint:
 	uvx pre-commit run --all-files
 

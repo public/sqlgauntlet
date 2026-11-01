@@ -10,8 +10,9 @@ read (it runs inside BEGIN ... ROLLBACK). The corpus is in SQLite's dialect; dia
 
 Other dialects (dialect.py): each statement's text for that dialect comes from the corpus's overrides
 (<corpus>/dialects/<dialect>.jsonl, {"id", "sql"} or {"id", "untranslatable": reason}), else from sqlglot's
-transpiler. A statement with no text for the dialect goes to <p>.untranslated.tsv with the reason, never dropped
-silently: compare counts it."""
+transpiler, its parameters renumbered for the dialect. A statement with no text for the dialect goes to
+<p>.untranslated.tsv with the reason, never dropped silently: compare counts it. No build files: run.py exports the
+SQLite build of each app's database for the dialect (export.py), so every engine reads the same data."""
 
 import json
 import os
@@ -119,10 +120,12 @@ def prep(corpus, out, scale='1', projects=(), ids=None, wave='', heavy=False, di
         analyze = '\nANALYZE;\n' if meta.get('analyze', True) else '\n'
         loads = [line.split('\t') for line in (pdir / 'load.tsv').read_text().splitlines() if line.strip()] if (pdir / 'load.tsv').exists() else []
         build = f"PRAGMA journal_mode=OFF;\nCREATE TEMP TABLE _cfg AS SELECT {scale} AS scale;\n" + (pdir / 'schema.sql').read_text() + '\n' + data
-        if loads:  # (data files through the driver's load, then post.sql and ANALYZE: run.py's build)
+        if tr:  # (another dialect's database is exported from the SQLite build: export.py)
+            pass
+        elif loads:  # (data files through the driver's load, then post.sql and ANALYZE: run.py's build)
             post = ((pdir / 'post.sql').read_text() if (pdir / 'post.sql').exists() else '') + analyze
             _put(out / f'{p}.load.tsv', ''.join(f'{t}\t{(pdir / f).resolve()}\t{fmt}\n' for t, f, fmt in loads))
-            _put(out / f'{p}.post.sql', tr.script(p, post) if tr else post)
+            _put(out / f'{p}.post.sql', post)
         else:
             build += analyze
         f = [f"@@X {x.rstrip(';')};\n" for x in meta.get('pragmas', [])]
@@ -130,21 +133,21 @@ def prep(corpus, out, scale='1', projects=(), ids=None, wave='', heavy=False, di
         for q in qs:
             tags = man.get(q['id'], {}).get('tags', [])
             sql = q['sql']
+            params = q['params']
             if tr:
-                sql, why = tr.statement(q['id'], sql)
+                sql, params, why = tr.statement(q['id'], sql, params)
                 if sql is None:
                     skipped.append((q['id'], why))
                     continue
             ordered = int('orderby' in tags or 'topn' in tags)
             write = int('read' not in tags)
             f.append(f"@@Q {q['id']} {ordered} {write} {','.join(tags) or '-'}\n")
-            for nm, lit in q['params']:
+            for nm, lit in params:
                 f.append(f'@@P {nm} {lit}\n')
             f.append(sql + '\n')
             n += 1
-        if tr:
-            build = tr.script(p, build)
-        _put(out / f'{p}.build.sql', build)
+        if not tr:
+            _put(out / f'{p}.build.sql', build)
         _put(out / f'{p}.q', ''.join(f))
         if str(scale) == '1':  # (the manifest's row and change counts were recorded at scale 1: compare checks every arm against them)
             _put(
