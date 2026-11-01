@@ -12,6 +12,7 @@ git -C "$G" cat-file -e "$PIN^{commit}" || { echo "fetch.sh: $SRC has no commit 
 APPS=$(awk -F'\t' '!/^#/ && $3 == "fetch" { print $1 }' "$C/licences.tsv")
 P=""; for a in $APPS; do P="$P bench/corpus/projects/$a"; done
 T=$C/fetched/x; rm -rf "$T"; mkdir -p "$T"
+# shellcheck disable=SC2086  # (one path per app: split on purpose)
 git -C "$G" archive "$PIN" $P | tar -x -C "$T"
 for a in $APPS; do rm -rf "$C/projects/$a"; mv "$T/bench/corpus/projects/$a" "$C/projects/$a"; rm -f "$C/projects/$a/expected.json" "$C/projects/$a/timings.json"; done
 git -C "$G" show "$PIN:bench/corpus/manifest.jsonl" | python3 -c "
@@ -19,4 +20,4 @@ import json, sys; keep = set(sys.argv[1].split())
 for l in sys.stdin:
     if l.strip() and json.loads(l)['project'] in keep: sys.stdout.write(l)" "$APPS" > "$C/manifest.fetched.jsonl"
 rm -rf "$T"
-echo "fetch.sh: $(echo $APPS | wc -w | tr -d ' ') apps, $(wc -l < "$C/manifest.fetched.jsonl" | tr -d ' ') statements at ${PIN%????????????????????????????????}"
+echo "fetch.sh: $(echo "$APPS" | wc -w | tr -d ' ') apps, $(wc -l < "$C/manifest.fetched.jsonl" | tr -d ' ') statements at $(echo "$PIN" | cut -c1-10)"

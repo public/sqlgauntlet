@@ -6,6 +6,7 @@
   3. otherwise untranslatable: "no translator"
 The schema and data scripts go through the same path, by project: overrides {"project": ..., "script": ...}.
 Untranslatable statements are reported by compare as such, never dropped silently."""
+
 import json
 from pathlib import Path
 
@@ -16,17 +17,23 @@ class Translator:
         f = Path(corpus) / 'dialects' / f'{dialect}.jsonl'
         if f.exists():
             for l in open(f):
-                if not l.strip(): continue
+                if not l.strip():
+                    continue
                 r = json.loads(l)
-                if 'project' in r: self.scripts[r['project']] = r['script']
-                else: self.over[r['id']] = r
+                if 'project' in r:
+                    self.scripts[r['project']] = r['script']
+                else:
+                    self.over[r['id']] = r
         try:
-            import sqlglot; self.sg = sqlglot
+            import sqlglot
+
+            self.sg = sqlglot
         except ImportError:
             self.sg = None
 
     def _glot(self, sql):
-        if not self.sg: return None, 'no translator (pip install sqlglot)'
+        if not self.sg:
+            return None, 'no translator (pip install sqlglot)'
         try:
             out = self.sg.transpile(sql, read='sqlite', write=self.dialect, unsupported_level=self.sg.ErrorLevel.RAISE)
         except Exception as e:
@@ -36,10 +43,12 @@ class Translator:
     def statement(self, i, sql):
         """(text, None) or (None, why)"""
         o = self.over.get(i)
-        if o: return (o['sql'], None) if 'sql' in o else (None, 'override: ' + o['untranslatable'])
+        if o:
+            return (o['sql'], None) if 'sql' in o else (None, 'override: ' + o['untranslatable'])
         return self._glot(sql)
 
     def script(self, project, sql):
-        if project in self.scripts: return self.scripts[project]
+        if project in self.scripts:
+            return self.scripts[project]
         t, why = self._glot(sql)
         return t if t else f'-- untranslatable: {why}\n'

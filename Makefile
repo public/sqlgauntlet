@@ -39,9 +39,9 @@ define sqlite_backend
 	echo "$(CC) $(CFLAGS) $(SQLOPTS) $(3)" > $@.cflags
 endef
 $(B)/backends/stock.so: adapters/sqlite.c adapters/regexp.c include/sqlgauntlet.h third_party/sqlite/sqlite3.c
-	$(call sqlite_backend,stock,third_party/sqlite,-DSB_NAME='"stock"')
+	$(call sqlite_backend,stock,third_party/sqlite,-DSG_NAME='"stock"')
 $(B)/backends/libsql.so: adapters/sqlite.c adapters/regexp.c include/sqlgauntlet.h third_party/libsql/sqlite3.c
-	$(call sqlite_backend,libsql,third_party/libsql,-DSB_NAME='"libsql"')
+	$(call sqlite_backend,libsql,third_party/libsql,-DSG_NAME='"libsql"')
 
 # turbo: cursed-sqlite-turbo's native build (qc/patch.py over the same SQLite 3.54.1, qc.c appended), serving inside
 # sqlite3_step when the process runs with QC_SERVE=1 (python/sqlgauntlet/arms.py sets it per arm)
@@ -53,7 +53,7 @@ $(B)/turbo/sqlite3.c: third_party/sqlite/sqlite3.c $(wildcard $(TURBO)/qc/*)
 	cp third_party/sqlite/sqlite3.h $(B)/turbo/
 	git -C $(TURBO) rev-parse HEAD > $(B)/turbo/COMMIT; git -C $(TURBO) status --porcelain qc | head -c 2000 > $(B)/turbo/DIRTY
 $(B)/backends/turbo.so: adapters/sqlite.c adapters/regexp.c include/sqlgauntlet.h $(B)/turbo/sqlite3.c
-	$(call sqlite_backend,turbo,$(B)/turbo,-I$(TURBO)/qc -DSB_NAME='"turbo"' -DSB_VERSION_NOTE='" + turbo $(shell cut -c1-10 $(B)/turbo/COMMIT 2>/dev/null)"')
+	$(call sqlite_backend,turbo,$(B)/turbo,-I$(TURBO)/qc -DSG_NAME='"turbo"' -DSG_VERSION_NOTE='" + turbo $(shell cut -c1-10 $(B)/turbo/COMMIT 2>/dev/null)"')
 
 clean:
 	rm -rf $(B)
@@ -75,3 +75,10 @@ $(B)/backends/turso.so: adapters/turso.c include/sqlgauntlet.h $(TURSO_DIR)/targ
 	$(CC) $(CFLAGS) $(SO) -Iinclude -I$(TURSO_DIR)/sdk-kit adapters/turso.c $(TURSO_DIR)/target/release/libturso_sdk_kit.a -o $@ \
 	  $(if $(filter Darwin,$(UNAME)),-framework CoreFoundation -framework Security -liconv,-lpthread -ldl -lm)
 	echo "$(CC) $(CFLAGS); turso $$(git -C $(TURSO_DIR) rev-parse HEAD) cargo --release" > $@.cflags
+
+# make test: tests/smoke.py over a few vendored apps (TEST_APPS) with stock and libSQL; make lint: what CI's lint job runs
+test: all $(B)/backends/libsql.so
+	python3 tests/smoke.py
+lint:
+	uvx pre-commit run --all-files
+.PHONY: test lint

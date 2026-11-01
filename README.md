@@ -79,6 +79,9 @@ Values cross the ABI as `sg_value`, SQLite's five storage classes with the same 
 ### The driver (`src/driver.c`, `libsqlgauntlet.a`)
 
 The modes are those of turbo's `bench/corpus/corpus.c`, with the same output lines, byte for byte for the same rows.
+`tools/identity.py` holds it to that: on the full corpus, every C line of sqlgauntlet's stock and turbo arms equals
+those of turbo's own driver built over the same engines. There is one deliberate difference: a statement tagged
+`wallclock` isn't called `unstable` when the clock ticks between its 8 runs, because its values follow the clock.
 turbo's `compare.py` and `summarise.py` read sqlgauntlet's output, and sqlgauntlet's reports read turbo's.
 
 | mode | what | lines |

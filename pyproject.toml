@@ -18,3 +18,14 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["python"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+ignore = ["E701", "E702", "E731", "E741", "B023"]   # (one-line compound statements and short lambdas are the house style)
+
+[tool.ruff.format]
+quote-style = "preserve"
