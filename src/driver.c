@@ -1,5 +1,5 @@
-/* driver.c: libsqlbench's driver, sb_main(). It reads a corpus file (python/sqlbench/prep.py's <project>.q) and runs
-** its statements through a backend table (include/sqlbench.h). Modes, argv[1]:
+/* driver.c: libsqlgauntlet's driver, sg_main(). It reads a corpus file (python/sqlgauntlet/prep.py's <project>.q) and runs
+** its statements through a backend table (include/sqlgauntlet.h). Modes, argv[1]:
 **   build <db> <project.build.sql>                make the database (a script through the backend's exec)
 **   check <db> <project.q> [only-id]              each statement 6 times on one handle, then twice freshly prepared:
 **        C id status rows changes hash msethash served/runs error      status ok | err | unstable (runs disagree)
@@ -7,9 +7,9 @@
 **   hot|prep <db> <project.q> [reps] [budget-ms] [only-id]   timing:
 **        T id rows hash first-ms median-ms mean-ms runs instr cycles served/runs error
 **     hot: prepared once, then 1 + reps executions (reset between); prep: every execution prepares, binds, steps and
-**     finalizes. reps stop early once budget-ms is spent (at least SB_MIN_REPS, default 3). instr, cycles: user mode,
+**     finalizes. reps stop early once budget-ms is spent (at least SG_MIN_REPS, default 3). instr, cycles: user mode,
 **     per execution (Linux perf_event_open; -1 elsewhere or when the kernel refuses).
-**     SB_EXEC=1: after each T line, one E line per counted execution, in order (k from 1), for warm-up vs steady state:
+**     SG_EXEC=1: after each T line, one E line per counted execution, in order (k from 1), for warm-up vs steady state:
 **        E id k served ms instr cycles engine-ms
 **   rows <db> <project.q> <id> [limit]            the statement's normalised rows, one R line each (disagreement reports)
 **   info                                          the backend's name, dialect and version: I name dialect version
@@ -18,7 +18,7 @@
 ** Reads run in autocommit; writes inside BEGIN ... ROLLBACK, outside the timed span. hash: the rows in order;
 ** msethash: the rows as a multiset.
 ** Normalised values (N lines, rows): integers and floats are one kind, numbers; a float with an exact integer value
-** within 2^53 hashes as that integer, any other float as its value rounded to SB_DIGITS significant digits (default
+** within 2^53 hashes as that integer, any other float as its value rounded to SG_DIGITS significant digits (default
 ** 12); text and blobs keep their bytes and their kind; NULL is NULL. So 3 and 3.0 agree, 0.1+0.2 and 0.3 agree, '3' and
 ** 3 do not. */
 #include <stdio.h>
@@ -27,15 +27,15 @@
 #include <math.h>
 #include <time.h>
 #include <unistd.h>
-#include "sqlbench.h"
+#include "sqlgauntlet.h"
 #ifdef __linux__
 #include <linux/perf_event.h>
 #include <sys/ioctl.h>
 #include <sys/syscall.h>
 #endif
 
-static const sb_backend *B;
-static sb_conn *db;
+static const sg_backend *B;
+static sg_conn *db;
 static char err[512];
 
 static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
@@ -53,7 +53,7 @@ static void perf_open(void) {
     struct perf_event_attr a; memset(&a, 0, sizeof a);
     a.size = sizeof a; a.type = PERF_TYPE_HARDWARE; a.config = cfg[i]; a.disabled = 1; a.exclude_kernel = 1; a.exclude_hv = 1;
     perf_fd[i] = (int)syscall(SYS_perf_event_open, &a, 0, -1, -1, 0);
-    if (perf_fd[i] < 0) { fprintf(stderr, "sqlbench: perf_event_open: counters unavailable\n"); perf_fd[0] = perf_fd[1] = -1; return; }
+    if (perf_fd[i] < 0) { fprintf(stderr, "sqlgauntlet: perf_event_open: counters unavailable\n"); perf_fd[0] = perf_fd[1] = -1; return; }
   }
 #endif
 }
@@ -74,8 +74,8 @@ static void perf_reset(void) {
 typedef struct Q { char *id; int ordered, write; char *tags; int np, cp; char **pn, **pl; char *sql; } Q;
 typedef struct R { long rows, changes; unsigned long long h, hs, nh, nhs; int served; double engine_ms; char err[256]; } R;
 
-static sb_stmt *s_begin, *s_rollback;
-typedef struct { sb_value v; void *own; } PV;
+static sg_stmt *s_begin, *s_rollback;
+typedef struct { sg_value v; void *own; } PV;
 static PV *pv; static int npv;   /* the current statement's parameter values (each literal evaluated once, by the backend) */
 
 static char *slurp(const char *f) {
@@ -116,16 +116,16 @@ static void params_eval(Q *q) {
   for (int i = 0; i < q->np; i++) {
     free(pv[i].own); memset(&pv[i], 0, sizeof pv[i]);
     size_t n = strlen(q->pl[i]) + 8; char *s = malloc(n); snprintf(s, n, "SELECT %s", q->pl[i]);
-    sb_stmt *st = B->prepare(db, s, err, sizeof err);
-    if (st && B->step(st) == SB_ROW) {
-      sb_value v; B->column(st, 0, &v); pv[i].v = v;
-      if (v.type == SB_TEXT || v.type == SB_BLOB) { pv[i].own = malloc(v.n + 1); if (v.n) memcpy(pv[i].own, v.p, v.n); ((char *)pv[i].own)[v.n] = 0; pv[i].v.p = pv[i].own; }
+    sg_stmt *st = B->prepare(db, s, err, sizeof err);
+    if (st && B->step(st) == SG_ROW) {
+      sg_value v; B->column(st, 0, &v); pv[i].v = v;
+      if (v.type == SG_TEXT || v.type == SG_BLOB) { pv[i].own = malloc(v.n + 1); if (v.n) memcpy(pv[i].own, v.p, v.n); ((char *)pv[i].own)[v.n] = 0; pv[i].v.p = pv[i].own; }
     } else pv[i].v.type = 0;   /* (unbound, as corpus.c leaves a literal its engine can't evaluate) */
     if (st) B->finalize(st);
     free(s);
   }
 }
-static void bind(Q *q, sb_stmt *st) {
+static void bind(Q *q, sg_stmt *st) {
   for (int i = 0; i < q->np; i++) {
     int k = B->param_index(st, q->pn[i]);   /* (an anonymous ? has no name: "?N" is the Nth) */
     if (k == 0 && q->pn[i][0] == '?') { k = atoi(q->pn[i] + 1); if (k > B->param_count(st)) k = 0; }
@@ -134,41 +134,41 @@ static void bind(Q *q, sb_stmt *st) {
 }
 
 static int digits = 12;
-static unsigned long long nval(unsigned long long h, const sb_value *v) {   /* a normalised value into h */
-  int kind = v->type == SB_FLOAT ? SB_INTEGER : v->type;
+static unsigned long long nval(unsigned long long h, const sg_value *v) {   /* a normalised value into h */
+  int kind = v->type == SG_FLOAT ? SG_INTEGER : v->type;
   h = fnv(h, &kind, sizeof kind);
-  if (v->type == SB_INTEGER) { double d = (double)v->i; if (d >= -9007199254740992.0 && d <= 9007199254740992.0) { long long x = v->i; h = fnv(h, &x, sizeof x); }
+  if (v->type == SG_INTEGER) { double d = (double)v->i; if (d >= -9007199254740992.0 && d <= 9007199254740992.0) { long long x = v->i; h = fnv(h, &x, sizeof x); }
                                else { char b[40]; int n = snprintf(b, sizeof b, "%.*g", digits, d); h = fnv(h, b, (size_t)n); } }
-  else if (v->type == SB_FLOAT) {
+  else if (v->type == SG_FLOAT) {
     double d = v->f;
     if (d == floor(d) && fabs(d) <= 9007199254740992.0) { long long x = (long long)d; h = fnv(h, &x, sizeof x); }
     else { char b[40]; int n = snprintf(b, sizeof b, "%.*g", digits, d); h = fnv(h, b, (size_t)n); }
-  } else if (v->type == SB_TEXT || v->type == SB_BLOB) h = fnv(h, v->p, v->n);
+  } else if (v->type == SG_TEXT || v->type == SG_BLOB) h = fnv(h, v->p, v->n);
   return h;
 }
-static void ntext(const sb_value *v, char *b, size_t n) {   /* a normalised value as text (rows mode) */
-  if (v->type == SB_NULL) snprintf(b, n, "NULL");
-  else if (v->type == SB_INTEGER) snprintf(b, n, "%lld", (long long)v->i);
-  else if (v->type == SB_FLOAT) { if (v->f == floor(v->f) && fabs(v->f) <= 9007199254740992.0) snprintf(b, n, "%lld", (long long)v->f); else snprintf(b, n, "%.*g", digits, v->f); }
-  else if (v->type == SB_TEXT) { size_t k = v->n < n - 3 ? v->n : n - 3; b[0] = '\''; memcpy(b + 1, v->p, k); b[k + 1] = '\''; b[k + 2] = 0; for (size_t i = 1; i <= k; i++) if (b[i] == '\t' || b[i] == '\n') b[i] = ' '; }
+static void ntext(const sg_value *v, char *b, size_t n) {   /* a normalised value as text (rows mode) */
+  if (v->type == SG_NULL) snprintf(b, n, "NULL");
+  else if (v->type == SG_INTEGER) snprintf(b, n, "%lld", (long long)v->i);
+  else if (v->type == SG_FLOAT) { if (v->f == floor(v->f) && fabs(v->f) <= 9007199254740992.0) snprintf(b, n, "%lld", (long long)v->f); else snprintf(b, n, "%.*g", digits, v->f); }
+  else if (v->type == SG_TEXT) { size_t k = v->n < n - 3 ? v->n : n - 3; b[0] = '\''; memcpy(b + 1, v->p, k); b[k + 1] = '\''; b[k + 2] = 0; for (size_t i = 1; i <= k; i++) if (b[i] == '\t' || b[i] == '\n') b[i] = ' '; }
   else { size_t o = (size_t)snprintf(b, n, "x'"); for (size_t i = 0; i < v->n && o + 4 < n; i++) o += (size_t)snprintf(b + o, n - o, "%02x", ((const unsigned char *)v->p)[i]); snprintf(b + o, n - o, "'"); }
 }
 
 /* one execution of a prepared statement (timed: steps and row reads only); writes inside BEGIN ... ROLLBACK */
 static double t_exec;
 static int show, rows_limit = -1;
-static int exec1(Q *q, sb_stmt *st, R *r) {
+static int exec1(Q *q, sg_stmt *st, R *r) {
   if (q->write) { B->step(s_begin); B->reset(s_begin); }
   if (B->exec_begin) B->exec_begin(st);
   unsigned long long h = 1469598103934665603ULL, hs = 0, nh = 1469598103934665603ULL, nhs = 0; long n = 0; int rc;
   perf_on(1); double t0 = now_ms();
-  while ((rc = B->step(st)) == SB_ROW) {
+  while ((rc = B->step(st)) == SG_ROW) {
     unsigned long long rh = 1469598103934665603ULL, nrh = 1469598103934665603ULL; int nc = B->column_count(st);
     for (int i = 0; i < nc; i++) {
-      sb_value v; B->column(st, i, &v); int t = v.type; rh = fnv(rh, &t, sizeof t);
-      if (t == SB_INTEGER) rh = fnv(rh, &v.i, sizeof v.i);
-      else if (t == SB_FLOAT) rh = fnv(rh, &v.f, sizeof v.f);
-      else if (t == SB_TEXT || t == SB_BLOB) rh = fnv(rh, v.p, v.n);
+      sg_value v; B->column(st, i, &v); int t = v.type; rh = fnv(rh, &t, sizeof t);
+      if (t == SG_INTEGER) rh = fnv(rh, &v.i, sizeof v.i);
+      else if (t == SG_FLOAT) rh = fnv(rh, &v.f, sizeof v.f);
+      else if (t == SG_TEXT || t == SG_BLOB) rh = fnv(rh, v.p, v.n);
       nrh = nval(nrh, &v);
       if (show || (rows_limit >= 0 && n < rows_limit)) {
         char b[256]; ntext(&v, b, sizeof b);
@@ -181,51 +181,51 @@ static int exec1(Q *q, sb_stmt *st, R *r) {
   }
   t_exec = now_ms() - t0; perf_on(0);
   r->rows = n; r->h = h; r->hs = hs; r->nh = nh; r->nhs = nhs; r->changes = (long)B->changes(db);
-  sb_exec_stats es = { -1, -1, { -1, -1, -1, -1 } };
+  sg_exec_stats es = { -1, -1, { -1, -1, -1, -1 } };
   if (B->exec_stats) B->exec_stats(st, &es);
-  r->served = es.served == 1 && rc == SB_DONE; r->engine_ms = es.engine_ms;
+  r->served = es.served == 1 && rc == SG_DONE; r->engine_ms = es.engine_ms;
   r->err[0] = 0;
-  if (rc != SB_DONE) snprintf(r->err, sizeof r->err, "%s", B->errmsg(db));
+  if (rc != SG_DONE) snprintf(r->err, sizeof r->err, "%s", B->errmsg(db));
   B->reset(st);
   if (q->write) { B->step(s_rollback); B->reset(s_rollback); }
-  return rc == SB_DONE ? 0 : 1;
+  return rc == SG_DONE ? 0 : 1;
 }
-static int prep(Q *q, sb_stmt **st, R *r) {
+static int prep(Q *q, sg_stmt **st, R *r) {
   if (!(*st = B->prepare(db, q->sql, err, sizeof err))) { snprintf(r->err, sizeof r->err, "prepare: %s", err); return 1; }
   bind(q, *st); return 0;
 }
 static void clean(char *s) { for (; *s; s++) if (*s == '\t' || *s == '\n') *s = ' '; }
 
-int sb_main(const sb_backend *b, int argc, char **argv) {
+int sg_main(const sg_backend *b, int argc, char **argv) {
   B = b;
-  if (!B || B->abi != SQLBENCH_ABI) { fprintf(stderr, "sqlbench: backend ABI %d, driver %d\n", B ? B->abi : -1, SQLBENCH_ABI); return 2; }
+  if (!B || B->abi != SQLGAUNTLET_ABI) { fprintf(stderr, "sqlgauntlet: backend ABI %d, driver %d\n", B ? B->abi : -1, SQLGAUNTLET_ABI); return 2; }
   if (argc >= 2 && !strcmp(argv[1], "info")) { printf("I\t%s\t%s\t%s\n", B->name, B->dialect, B->version ? B->version() : "-"); return 0; }
-  if (argc < 4) { fprintf(stderr, "usage: sqlbench build|check|hot|prep|rows|info <db> <file> ...\n"); return 2; }
-  const char *mode = argv[1]; show = getenv("SB_ROWS") != 0;
-  int sexec = getenv("SB_EXEC") && atoi(getenv("SB_EXEC")) > 0;
-  if (getenv("SB_DIGITS")) digits = atoi(getenv("SB_DIGITS"));
-  if (!(db = B->open(argv[2], err, sizeof err))) { fprintf(stderr, "sqlbench: open %s: %s\n", argv[2], err); return 2; }
+  if (argc < 4) { fprintf(stderr, "usage: sqlgauntlet build|check|hot|prep|rows|info <db> <file> ...\n"); return 2; }
+  const char *mode = argv[1]; show = getenv("SG_ROWS") != 0;
+  int sexec = getenv("SG_EXEC") && atoi(getenv("SG_EXEC")) > 0;
+  if (getenv("SG_DIGITS")) digits = atoi(getenv("SG_DIGITS"));
+  if (!(db = B->open(argv[2], err, sizeof err))) { fprintf(stderr, "sqlgauntlet: open %s: %s\n", argv[2], err); return 2; }
   if (!strcmp(mode, "build")) {
     char *sql = slurp(argv[3]);
-    if (B->exec(db, sql, err, sizeof err)) { fprintf(stderr, "sqlbench: build %s: %s\n", argv[3], err); return 1; }
+    if (B->exec(db, sql, err, sizeof err)) { fprintf(stderr, "sqlgauntlet: build %s: %s\n", argv[3], err); return 1; }
     B->close(db); return 0;
   }
   s_begin = B->prepare(db, "BEGIN", err, sizeof err); s_rollback = B->prepare(db, "ROLLBACK", err, sizeof err);
   Q *qs; int nq = parse(slurp(argv[3]), &qs);
   for (int i = 0; i < npragma; i++)
-    if (B->exec(db, pragma[i], err, sizeof err)) { fprintf(stderr, "sqlbench: %s: %s\n", pragma[i], err); return 1; }
+    if (B->exec(db, pragma[i], err, sizeof err)) { fprintf(stderr, "sqlgauntlet: %s: %s\n", pragma[i], err); return 1; }
   int check = !strcmp(mode, "check"), hot = !strcmp(mode, "hot"), rows = !strcmp(mode, "rows");
-  if (!check && !hot && !rows && strcmp(mode, "prep")) { fprintf(stderr, "sqlbench: unknown mode %s\n", mode); return 2; }
+  if (!check && !hot && !rows && strcmp(mode, "prep")) { fprintf(stderr, "sqlgauntlet: unknown mode %s\n", mode); return 2; }
   int reps = argc > 4 && !check && !rows ? atoi(argv[4]) : 200; double budget = argc > 5 && !check && !rows ? atof(argv[5]) : 100;
   const char *only = check ? (argc > 4 ? argv[4] : 0) : rows ? argv[4] : (argc > 6 ? argv[6] : 0);
-  int minr = getenv("SB_MIN_REPS") ? atoi(getenv("SB_MIN_REPS")) : 3;
+  int minr = getenv("SG_MIN_REPS") ? atoi(getenv("SG_MIN_REPS")) : 3;
   if (!check && !rows) perf_open();
   double *t = malloc(sizeof *t * (size_t)(reps + 1));
   struct E { int served; double ms, ins, cyc, eng; } *ex = sexec ? malloc(sizeof *ex * (size_t)(reps + 1)) : 0;
   for (int i = 0; i < nq; i++) {
     Q *q = &qs[i]; if (only && strcmp(only, q->id)) continue;
     params_eval(q);
-    R r0, r; memset(&r0, 0, sizeof r0); memset(&r, 0, sizeof r); sb_stmt *st = 0;
+    R r0, r; memset(&r0, 0, sizeof r0); memset(&r, 0, sizeof r); sg_stmt *st = 0;
     if (rows) {
       rows_limit = argc > 5 ? atoi(argv[5]) : 20;
       printf("R\t%s\n", q->id); fflush(stdout);

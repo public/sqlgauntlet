@@ -1,5 +1,5 @@
 [project]
-name = "sqlbench"
+name = "sqlgauntlet"
 version = "0.1.0"
 description = "Correctness and performance harness for SQL engines over real application statements"
 requires-python = ">=3.9"
@@ -7,10 +7,10 @@ license = "MIT"
 optional-dependencies = { dialects = ["sqlglot"] }
 
 [project.scripts]
-sqlbench-prep = "sqlbench.prep:main"
-sqlbench-run = "sqlbench.run:main"
-sqlbench-compare = "sqlbench.compare:main"
-sqlbench-summarise = "sqlbench.summarise:main"
+sqlgauntlet-prep = "sqlgauntlet.prep:main"
+sqlgauntlet-run = "sqlgauntlet.run:main"
+sqlgauntlet-compare = "sqlgauntlet.compare:main"
+sqlgauntlet-summarise = "sqlgauntlet.summarise:main"
 
 [build-system]
 requires = ["setuptools>=61"]

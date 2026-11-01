@@ -32,6 +32,7 @@ optuna	MIT	vendor	https://github.com/optuna/optuna	01ddd17ab9f36c3d2817aed9afe37
 phoenix	Elastic-2.0	fetch	https://github.com/Arize-ai/phoenix	6359d6388815d56f7795a3a8cd11e89a71793e01	30
 pihole-ftl	EUPL-1.2	fetch	https://github.com/pi-hole/FTL	29c8b13f4bba0c4f4f47598e45a65cbf1cedac88	30
 prefect	Apache-2.0	vendor	https://github.com/PrefectHQ/prefect	f20489df2e281525d7bcf3bc9de65e086853b6b1	30
+screenpipe	MIT	vendor	https://github.com/screenpipe/screenpipe	892199f742e46d0c5d9e8c06687b35ca7c2b6547	31
 signal-desktop	AGPL-3.0-only	fetch	https://github.com/signalapp/Signal-Desktop	17502b9d1a9e34af689f31508c4ac4ccee5b5cb7	29
 synapse	AGPL-3.0	fetch	https://github.com/element-hq/synapse	b20ae98cc5ead16212de01f00dff8862f1766bb3	35
 syncthing	MPL-2.0	vendor	https://github.com/syncthing/syncthing	ed38528d7fba3dd6a42c9c9fc6780af432dc15d2	31

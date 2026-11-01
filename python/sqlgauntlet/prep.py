@@ -44,7 +44,7 @@ def _put(path, text):   # (unchanged files keep their time: a database is rebuil
 
 
 def manifest(corpus):
-    """every manifest*.jsonl: turbo's one manifest.jsonl, or sqlbench's vendored and fetched halves"""
+    """every manifest*.jsonl: turbo's one manifest.jsonl, or sqlgauntlet's vendored and fetched halves"""
     man = {}
     for f in sorted(Path(corpus).glob('manifest*.jsonl')):
         for l in open(f):
@@ -96,7 +96,7 @@ def prep(corpus, out, scale='1', projects=(), ids=None, wave='', heavy=False, di
 
 def main(argv=None):
     import argparse
-    a = argparse.ArgumentParser(prog='sqlbench-prep', description=__doc__.split('\n')[0])
+    a = argparse.ArgumentParser(prog='sqlgauntlet-prep', description=__doc__.split('\n')[0])
     a.add_argument('corpus'); a.add_argument('out'); a.add_argument('projects', nargs='*')
     a.add_argument('--scale', default='1'); a.add_argument('--ids', help='a file whose lines start with statement ids')
     a.add_argument('--wave', default=os.environ.get('WAVE', '')); a.add_argument('--heavy', action='store_true')

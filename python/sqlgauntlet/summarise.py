@@ -3,7 +3,7 @@
   and cycles when the counters ran), with a 95 % percentile-bootstrap interval over rounds (each arm's rounds drawn
   independently, 1,000 draws). A group's ratio is the geometric mean of its statements', bootstrapped the same way.
 - Distributions: the per-statement time ratios' percentiles and how many are over 1.02 or under 0.98.
-- Warm-up vs steady state (with per-execution E lines, sqlbench-run --exec-lines): an execution belongs to the
+- Warm-up vs steady state (with per-execution E lines, sqlgauntlet-run --exec-lines): an execution belongs to the
   warm-up while the arm is still deciding, i.e. up to the last one whose served flag differs from the one before
   (turbo's adapt trying the interpreter and its plan before its verdict); the rest is the steady state. The first,
   untimed execution (prepare and first run, T's first-ms) is reported apart. Steady-state ratios count only

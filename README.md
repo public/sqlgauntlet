@@ -1,4 +1,4 @@
-# sqlbench
+# sqlgauntlet
 
 A correctness and performance harness for SQL engines. It runs a corpus of real application statements through
 several backends and reports two things: **where the backends disagree** (not just a pass rate), and **how fast each
@@ -18,7 +18,7 @@ over SQLite, and keeps that bench's file formats and measurement rules. Its back
 ## Quick start
 
 ```bash
-make backends                        # build/sqlbench, build/libsqlbench.a, build/backends/{stock,turbo,libsql}.so
+make backends                        # build/sqlgauntlet, build/libsqlgauntlet.a, build/backends/{stock,turbo,libsql}.so
 ```
 
 ```bash
@@ -26,11 +26,11 @@ sh corpus/fetch.sh                   # the corpus apps that can't be committed h
 ```
 
 ```bash
-cd python && python3 -m sqlbench.run check --arm stock --arm turbo --arm libsql
+cd python && python3 -m sqlgauntlet.run check --arm stock --arm turbo --arm libsql
 ```
 
 ```bash
-cd python && python3 -m sqlbench.run speed --arm stock --arm turbo --rounds 3 --exec-lines
+cd python && python3 -m sqlgauntlet.run speed --arm stock --arm turbo --rounds 3 --exec-lines
 ```
 
 `TURBO=<checkout>` points the turbo backend at a cursed-sqlite-turbo tree (default `~/Documents/my-code/cursed-sqlite-jit`).
@@ -40,12 +40,12 @@ Results go to `build/run/` (`--out`): one TSV per arm and mode, `env.json`, and 
 
 ```
  corpus/ (projects/<app>/{schema,data,queries}.sql, manifest*.jsonl)
-    │  python/sqlbench/prep.py   (dialect.py for non-SQLite dialects)
+    │  python/sqlgauntlet/prep.py   (dialect.py for non-SQLite dialects)
     ▼
  <app>.build.sql, <app>.q        flat files, one pair per app
-    │  python/sqlbench/run.py    arms, interleaving, env.json
+    │  python/sqlgauntlet/run.py    arms, interleaving, env.json
     ▼
- sqlbench --backend X.so <mode>  src/driver.c over include/sqlbench.h
+ sqlgauntlet --backend X.so <mode>  src/driver.c over include/sqlgauntlet.h
     │                            (or any program with the same command line: an "exe" arm)
     ▼
  <arm>.check.tsv, <arm>.<hot|prep>.<round>.tsv   C / N / T / E lines
@@ -54,16 +54,16 @@ Results go to `build/run/` (`--out`): one TSV per arm and mode, `env.json`, and 
  Markdown: disagreements, timings
 ```
 
-### The backend interface (`include/sqlbench.h`)
+### The backend interface (`include/sqlgauntlet.h`)
 
-A backend is one table of C functions, `sb_backend`: `open`, `close`, `exec` (scripts), `prepare`, `param_count`,
+A backend is one table of C functions, `sg_backend`: `open`, `close`, `exec` (scripts), `prepare`, `param_count`,
 `param_index`, `bind`, `step`, `column_count`, `column`, `reset`, `finalize`, `changes`, `errmsg`. The optional
 hooks are `exec_begin` and `exec_stats` (per-execution facts the driver can't see), `counter_names` and `explain`.
-Values cross the ABI as `sb_value`, SQLite's five storage classes with the same numbers.
+Values cross the ABI as `sg_value`, SQLite's five storage classes with the same numbers.
 
 - **In-process engines** fill the table directly. `adapters/sqlite.c` serves any library with SQLite's C API
   (stock, turbo, libSQL). `adapters/turso.c` serves Turso's `turso.h`.
-- **Backends are shared objects** that export `sqlbench_backend_v1()`. The CLI loads one with `--backend` (dlopen,
+- **Backends are shared objects** that export `sqlgauntlet_backend_v1()`. The CLI loads one with `--backend` (dlopen,
   `RTLD_LOCAL`), so several builds of SQLite never share symbols. Each backend has its engine linked in and only
   that one symbol exported.
 - **"served"** is the one notion that comes from turbo, kept as an optional, generic field. It says whether the
@@ -76,10 +76,10 @@ Values cross the ABI as `sb_value`, SQLite's five storage classes with the same 
   backend and prints `engine-ms` on each E line, so `wall − engine` is the protocol and client cost. That split is
   in the interface and the E lines. No client adapter is written yet.
 
-### The driver (`src/driver.c`, `libsqlbench.a`)
+### The driver (`src/driver.c`, `libsqlgauntlet.a`)
 
 The modes are those of turbo's `bench/corpus/corpus.c`, with the same output lines, byte for byte for the same rows.
-turbo's `compare.py` and `summarise.py` read sqlbench's output, and sqlbench's reports read turbo's.
+turbo's `compare.py` and `summarise.py` read sqlgauntlet's output, and sqlgauntlet's reports read turbo's.
 
 | mode | what | lines |
 |---|---|---|
@@ -95,16 +95,16 @@ turbo's `compare.py` and `summarise.py` read sqlbench's output, and sqlbench's r
   only 64 parameters.
 - **Counters:** on Linux, user-mode instructions and cycles come from `perf_event_open` over the timed spans
   (`perf_event_paranoid ≤ 2`); elsewhere they are -1.
-- **E lines:** `SB_EXEC=1` prints one per execution: `E id k served ms instr cycles engine-ms`.
+- **E lines:** `SG_EXEC=1` prints one per execution: `E id k served ms instr cycles engine-ms`.
 
-### Correctness: normalisation and verdicts (`python/sqlbench/compare.py`)
+### Correctness: normalisation and verdicts (`python/sqlgauntlet/compare.py`)
 
 Every result is hashed twice:
 - **Strict** (`hash`, `msethash`): each value's storage class and bytes. This is turbo's hash: a JIT must match
   SQLite exactly.
 - **Normalised** (`nhash`, `nmsethash`):
   - **Numbers:** integers and floats are one kind. A float with an exact integer value within 2^53 counts as that
-    integer; other floats are rounded to `SB_DIGITS` significant digits (default 12).
+    integer; other floats are rounded to `SG_DIGITS` significant digits (default 12).
   - **Text and blobs** keep their bytes and their kind, and NULL is NULL. So `3` and `3.0` agree, and `'3'` and `3`
     don't.
 
@@ -152,11 +152,11 @@ The rules are turbo's, learnt the hard way:
   - the ratio distribution's percentiles;
   - the largest losses and wins.
 - **Recorded with every result:** box, kernel, CPU, compiler, every backend's build options and version, and the
-  corpus and sqlbench commits, in `env.json`.
+  corpus and sqlgauntlet commits, in `env.json`.
 - **Row counts and hashes checked in speed runs too.** A statement whose rows differ from the reference's is left
   out of the timings and listed.
 
-### Dialects (`python/sqlbench/dialect.py`)
+### Dialects (`python/sqlgauntlet/dialect.py`)
 
 The corpus is SQLite SQL. A backend's `dialect` picks how its text is made:
 1. a reviewed override in `corpus/dialects/<dialect>.jsonl`, either `{"id", "sql"}` or `{"id", "untranslatable": why}`;
@@ -169,45 +169,52 @@ silently. Schemas and data scripts go through the same path per app.
 This is the layer DuckDB, PostgreSQL and MySQL need. They are not done yet: the DuckDB adapter (its C API's prepared
 statements and result chunks) is the next step.
 
-## Using sqlbench from another project
+## Using sqlgauntlet from another project
 
-sqlbench is meant to be depended on, not copied:
-- **Python:** `pip install "sqlbench @ git+<url>@<commit>"`, or `pip install -e <checkout>` (`pyproject.toml`).
-  That gives `sqlbench-run`, `sqlbench-compare`, `sqlbench-summarise` and `sqlbench-prep`, or the `sqlbench` package
+sqlgauntlet is meant to be depended on, not copied:
+- **Python:** `pip install "sqlgauntlet @ git+<url>@<commit>"`, or `pip install -e <checkout>` (`pyproject.toml`).
+  That gives `sqlgauntlet-run`, `sqlgauntlet-compare`, `sqlgauntlet-summarise` and `sqlgauntlet-prep`, or the `sqlgauntlet` package
   to call.
-- **Your own corpus:** `--corpus <dir>` or `SQLBENCH_CORPUS` takes any directory in the corpus layout. turbo passes
+- **Your own corpus:** `--corpus <dir>` or `SQLGAUNTLET_CORPUS` takes any directory in the corpus layout. turbo passes
   its own `bench/corpus`.
 - **Your own engine, as a plug-in:** compile `adapters/sqlite.c` (or your own adapter) with your library into a shared
   object, and pass it as an arm: `--arm mine=so:path/mine.so:QC_SERVE=1`.
-- **Your own engine, as a library:** link `build/libsqlbench.a` and call `sb_main(&your_table, argc, argv)` from
+- **Your own engine, as a library:** link `build/libsqlgauntlet.a` and call `sg_main(&your_table, argc, argv)` from
   your test program. No dlopen is needed.
 - **Your own program:** `--arm ref=exe:path/to/program`. Anything with the driver's command line and output lines is
-  an arm. This is how `tools/identity.py` holds sqlbench to turbo's own `corpus.c`.
+  an arm. This is how `tools/identity.py` holds sqlgauntlet to turbo's own `corpus.c`.
 
-A project pins one sqlbench commit, the way it pins SQLite.
+A project pins one sqlgauntlet commit, the way it pins SQLite.
 
 ## Corpus
 
-43 apps and 1,276 statements, from cursed-sqlite-turbo's `bench/corpus` at the commit in `corpus/PIN`. Every statement
-names its app's repository, commit and file:line. Each app's licence decides where its SQL lives (`corpus/licences.tsv`):
+44 apps and 1,307 statements (1,302 without the 5 tagged `heavy`, which runs leave out unless `--heavy`), from
+cursed-sqlite-turbo's `bench/corpus` at the commit in `corpus/PIN`. Every statement names its app's repository, commit
+and file:line. Each app's licence decides where its SQL lives (`corpus/licences.tsv`):
 
 | class | licences | apps | statements | where |
 |---|---|---:|---:|---|
-| vendor | MIT, Apache-2.0, BSD-3-Clause, MPL-2.0 | 19 | 549 | committed in `corpus/projects/`, each with the app's LICENSE and a NOTICE.md |
+| vendor | MIT, Apache-2.0, BSD-3-Clause, MPL-2.0 | 20 | 580 | committed in `corpus/projects/`, each with the app's LICENSE and a NOTICE.md |
 | fetch | GPL-2.0/3.0, AGPL-3.0, EUPL-1.2, Elastic-2.0, n8n's Sustainable Use License | 24 | 727 | `corpus/fetch.sh` copies them from cursed-sqlite-turbo at the pinned commit |
 
 - **Our own work:** the synthetic data (`data.sql`) and `meta.json` are cursed-sqlite-turbo's own, under MIT.
-- **screenpipe** is not in the corpus: it moved to a licence that grants no right to redistribute.
+- **MPL-2.0 files** (firefox-places, syncthing) stay under the MPL, with its text beside them as `LICENSE`.
+- **screenpipe** is taken at its last MIT-licensed commit (892199f). It has since moved to a licence that grants no
+  right to redistribute.
+- **Fetching today:** the pinned commit is not yet pushed, and cursed-sqlite-turbo is still private. So
+  `corpus/fetch.sh` works only from a local checkout (`sh corpus/fetch.sh <checkout>`, or `TURBO_REPO`). Until both
+  are published, the vendored 580 statements are what anyone else can run. Never pin a turbo commit older than
+  0c63afa: earlier history carries screenpipe SQL under its newer licence.
 - **Regenerating:** `tools/corpus-split.py <turbo-repo> <commit>` rebuilds `corpus/` and refuses any licence it
   hasn't been told how to class.
 
 ## Layout
 
 ```
-include/sqlbench.h      the backend ABI and sb_main
-src/driver.c            the driver (libsqlbench.a); src/main.c the CLI
+include/sqlgauntlet.h      the backend ABI and sg_main
+src/driver.c            the driver (libsqlgauntlet.a); src/main.c the CLI
 adapters/               sqlite.c (any SQLite-API library), turso.c, regexp.c (SQLite's ext/misc, public domain)
-python/sqlbench/        prep, dialect, run, compare, summarise
+python/sqlgauntlet/        prep, dialect, run, compare, summarise
 corpus/                 vendored apps, licences.tsv, PIN, fetch.sh
 scripts/                pinned fetches: SQLite 3.54.1, libSQL, Turso
 tools/                  corpus-split.py, identity.py

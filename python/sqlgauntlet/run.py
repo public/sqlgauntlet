@@ -4,11 +4,11 @@
   <name>=exe:<program>[:K=V,...]             any program with the driver's command line (<program> <mode> <db> <file>
                                              ...), e.g. cursed-sqlite-turbo's own bench/corpus/corpus.c build: its
                                              lines are this driver's, so the reports compare it like any arm
-sqlbench-run check: every statement 8 times per arm (the driver's check mode) on fresh copies of one database per
+sqlgauntlet-run check: every statement 8 times per arm (the driver's check mode) on fresh copies of one database per
   project -> <out>/<arm>.check.tsv, then compare's report.
-sqlbench-run speed: --rounds rounds; in each, every project's database is copied once per arm and the arms run it in
+sqlgauntlet-run speed: --rounds rounds; in each, every project's database is copied once per arm and the arms run it in
   an order rotated by round and project (so no arm is always first or always last on a warm cache), hot then prep ->
-  <out>/<arm>.<mode>.<round>.tsv (SB_EXEC=1: per-execution E lines, for the warm-up/steady-state split), then
+  <out>/<arm>.<mode>.<round>.tsv (SG_EXEC=1: per-execution E lines, for the warm-up/steady-state split), then
   summarise's report.
 The box, kernel, compiler and every arm's build options and version go to <out>/env.json with the results."""
 import json, os, platform, shutil, subprocess, sys, time
@@ -28,14 +28,14 @@ class Arm:
     def __init__(self, spec, driver):
         name, _, rest = spec.partition('=')
         if not rest:
-            if name not in PRESETS: sys.exit(f'sqlbench-run: no preset arm {name} (presets: {", ".join(PRESETS)})')
+            if name not in PRESETS: sys.exit(f'sqlgauntlet-run: no preset arm {name} (presets: {", ".join(PRESETS)})')
             kind, path, env = PRESETS[name]; path = str(ROOT / path)
         else:
             kind, _, rest = rest.partition(':'); parts = rest.split(':')
             path, env = parts[0], dict(kv.split('=', 1) for kv in parts[1:] if kv)
-        if kind not in ('so', 'exe'): sys.exit(f'sqlbench-run: arm {spec}: kind must be so or exe')
+        if kind not in ('so', 'exe'): sys.exit(f'sqlgauntlet-run: arm {spec}: kind must be so or exe')
         self.name, self.kind, self.path, self.env = name, kind, os.path.abspath(path), env
-        if not os.path.exists(self.path): sys.exit(f'sqlbench-run: arm {name}: {self.path} not found (make backends?)')
+        if not os.path.exists(self.path): sys.exit(f'sqlgauntlet-run: arm {name}: {self.path} not found (make backends?)')
         self.cmd = [driver, '--backend', self.path] if kind == 'so' else [self.path]
 
     def environ(self, extra=None):
@@ -45,7 +45,7 @@ class Arm:
     def run(self, args, out=None, extra=None, timeout=1800):
         r = subprocess.run(self.cmd + [str(a) for a in args], stdout=out or subprocess.PIPE, stderr=subprocess.PIPE,
                            env=self.environ(extra), timeout=timeout, text=True)
-        if r.returncode: print(f'sqlbench-run: {self.name} {args[0]} {Path(str(args[-1])).name}: exit {r.returncode}: {r.stderr.strip()[-300:]}', file=sys.stderr)
+        if r.returncode: print(f'sqlgauntlet-run: {self.name} {args[0]} {Path(str(args[-1])).name}: exit {r.returncode}: {r.stderr.strip()[-300:]}', file=sys.stderr)
         return r
 
     def info(self):
@@ -71,20 +71,20 @@ def environment(arms, corpus):
             'perf_event_paranoid': sh('cat', '/proc/sys/kernel/perf_event_paranoid') if sys.platform.startswith('linux') else None,
             'corpus': str(corpus), 'corpus_commit': sh('git', '-C', str(corpus), 'rev-parse', 'HEAD'),
             'corpus_dirty': bool(sh('git', '-C', str(corpus), 'status', '--porcelain', '.')),
-            'sqlbench_commit': sh('git', '-C', str(ROOT), 'rev-parse', 'HEAD'),
+            'sqlgauntlet_commit': sh('git', '-C', str(ROOT), 'rev-parse', 'HEAD'),
             'arms': [a.info() for a in arms]}
 
 
 def main(argv=None):
     import argparse
-    a = argparse.ArgumentParser(prog='sqlbench-run', description=__doc__.split('\n')[0])
+    a = argparse.ArgumentParser(prog='sqlgauntlet-run', description=__doc__.split('\n')[0])
     a.add_argument('mode', choices=('check', 'speed'))
     a.add_argument('projects', nargs='*')
-    a.add_argument('--corpus', default=os.environ.get('SQLBENCH_CORPUS', str(ROOT / 'corpus')))
+    a.add_argument('--corpus', default=os.environ.get('SQLGAUNTLET_CORPUS', str(ROOT / 'corpus')))
     a.add_argument('--out', default=str(ROOT / 'build' / 'run'))
     a.add_argument('--arm', action='append', help='repeatable; default stock and turbo')
     a.add_argument('--build-with', help='the arm that builds the databases (default: the first)')
-    a.add_argument('--driver', default=str(ROOT / 'build' / 'sqlbench'))
+    a.add_argument('--driver', default=str(ROOT / 'build' / 'sqlgauntlet'))
     a.add_argument('--rounds', type=int, default=1); a.add_argument('--r0', type=int, default=1)
     a.add_argument('--reps', type=int, default=200); a.add_argument('--budget', type=float, default=60)
     a.add_argument('--modes', default='hot,prep'); a.add_argument('--exec-lines', action='store_true')
@@ -93,7 +93,7 @@ def main(argv=None):
     a.add_argument('--no-report', action='store_true')
     o = a.parse_args(argv)
     arms = [Arm(s, o.driver) for s in (o.arm or ['stock', 'turbo'])]
-    if len({x.name for x in arms}) != len(arms): sys.exit('sqlbench-run: arm names must differ')
+    if len({x.name for x in arms}) != len(arms): sys.exit('sqlgauntlet-run: arm names must differ')
     out = Path(o.out); q = out / 'q'; d = out / 'db'; tmp = out / 'tmp'
     for x in (out, d, tmp): x.mkdir(parents=True, exist_ok=True)
     ids = {l.split('\t')[0].split()[0] for l in open(o.ids) if l.strip() and not l.startswith('#')} if o.ids else None
@@ -117,11 +117,11 @@ def main(argv=None):
             with open(out / f'{arm.name}.check.tsv', 'w') as f:
                 for p in projects:
                     shutil.copyfile(d / f'{p}.db', c); arm.run(['check', c, q / f'{p}.q'], out=f)
-            print(f'sqlbench-run check: {arm.name}: {sum(1 for l in open(out / f"{arm.name}.check.tsv") if l.startswith("C"))} statements, {time.time() - t0:.0f} s', file=sys.stderr)
+            print(f'sqlgauntlet-run check: {arm.name}: {sum(1 for l in open(out / f"{arm.name}.check.tsv") if l.startswith("C"))} statements, {time.time() - t0:.0f} s', file=sys.stderr)
     else:
         if not o.keep:
             for f in list(out.glob('*.hot.*.tsv')) + list(out.glob('*.prep.*.tsv')): f.unlink()
-        modes = o.modes.split(','); extra = {'SB_EXEC': '1'} if o.exec_lines else {}
+        modes = o.modes.split(','); extra = {'SG_EXEC': '1'} if o.exec_lines else {}
         files = {}
         for r in range(o.r0, o.r0 + o.rounds):
             t0 = time.time()
@@ -133,7 +133,7 @@ def main(argv=None):
                     shutil.copyfile(d / f'{p}.db', c)   # (one copy per project, arm and round: writes roll back)
                     for m in modes: arm.run([m, c, q / f'{p}.q', o.reps, o.budget], out=files[arm.name, m, r], extra=extra)
             for f in files.values(): f.close()
-            files.clear(); print(f'sqlbench-run speed: round {r} done, {time.time() - t0:.0f} s', file=sys.stderr)
+            files.clear(); print(f'sqlgauntlet-run speed: round {r} done, {time.time() - t0:.0f} s', file=sys.stderr)
     (out / 'env.json').write_text(json.dumps(env, indent=1) + '\n')
     shutil.rmtree(tmp, ignore_errors=True)
     if o.no_report: return

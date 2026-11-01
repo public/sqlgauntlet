@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""identity.py <run-dir> <arm>=<reference-arm> ...: is sqlbench's driver measuring what cursed-sqlite-turbo's own bench
+"""identity.py <run-dir> <arm>=<reference-arm> ...: is sqlgauntlet's driver measuring what cursed-sqlite-turbo's own bench
 measures? For each pair, every statement's C line (status, rows, changes, ordered hash, multiset hash and error
 text) must be the same in both arms' <arm>.check.tsv; prints the counts and any statement that differs. Exit 1 when
 one does. served/runs is compared too but only counted: turbo's adapt decides on timings, so two runs of one build can

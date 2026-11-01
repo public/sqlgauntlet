@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""corpus-split.py <turbo-repo> <commit>: sqlbench's corpus/ from cursed-sqlite-turbo's bench/corpus at <commit>.
+"""corpus-split.py <turbo-repo> <commit>: sqlgauntlet's corpus/ from cursed-sqlite-turbo's bench/corpus at <commit>.
 Each application's licence decides where its statements live:
   vendor   MIT, Apache-2.0, BSD-3-Clause, MPL-2.0: committed here, under corpus/projects/<app>/ with the app's LICENSE
            and turbo's NOTICE.md beside the quoted SQL, unchanged
@@ -39,7 +39,7 @@ with tarfile.open(fileobj=io.BytesIO(tar)) as t:
     for mbr in t.getmembers():
         if not mbr.isfile(): continue
         rel = Path(mbr.name).relative_to(f'{base}/projects')
-        if rel.name in ('expected.json', 'timings.json'): continue   # (turbo's recorded stock results: sqlbench records its own)
+        if rel.name in ('expected.json', 'timings.json'): continue   # (turbo's recorded stock results: sqlgauntlet records its own)
         dst = out / 'projects' / rel; dst.parent.mkdir(parents=True, exist_ok=True); dst.write_bytes(t.extractfile(mbr).read())
 (out / 'manifest.vendored.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in man if r['project'] in vendored))
 (out / 'licences.tsv').write_text('# app\tlicence\tclass\trepo\tcommit\tstatements\n' + ''.join('\t'.join(map(str, r)) + '\n' for r in rows))
