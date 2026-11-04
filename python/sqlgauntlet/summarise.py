@@ -12,6 +12,9 @@
   steady-state executions, the median statement's kernel share of cycles, its page faults and context switches per
   execution, and its time split into step calls, column reads and the reset after it; then the statements whose
   kernel share differs most between the arms (time a side spends in the kernel is outside the user-mode counters).
+- A/A control (sqlgauntlet-run --aa): the arm <reference>-aa is the reference again, so its per-statement ratios are
+  the run's noise. Their 2.5th and 97.5th percentiles make a band, and for every other arm the statements outside it
+  are counted (time, and cycles when the counters ran): beyond what the reference does against itself.
 - Left out, and listed: statements whose rows differ from the reference's (unless they read the clock), that error,
   or that time at 0.
 Markdown on stdout."""
@@ -126,6 +129,22 @@ def where(items, SE, AE, rs, ra, ref, arm):
                 print(f"| {i} | {pair(i, 'kernel', '{:.0%}')} | {pair(i, 'faults', '{:.1f}')} | {pair(i, 'switches', '{:.2f}')} |")
 
 
+def band(d, ref, mode, k):
+    """the A/A band for measure k (0 time, 2 cycles): the 2.5th and 97.5th percentiles of <ref>-aa / <ref> over the
+    statements both ran without error and with the same rows, or None without an A/A arm"""
+    S, A = load(d, ref, mode)[0], load(d, ref + '-aa', mode)[0]
+    rs = []
+    for i in set(S) & set(A):
+        s, a = list(S[i].values()), list(A[i].values())
+        if s[0][7] != '-' or a[0][7] != '-' or min(v[k] for v in s + a) <= 0:
+            continue
+        rs.append(statistics.fmean(v[k] for v in a) / statistics.fmean(v[k] for v in s))
+    if len(rs) < 20:
+        return None
+    rs.sort()
+    return rs[int(0.025 * len(rs))], rs[min(len(rs) - 1, int(0.975 * len(rs)))]
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     d = argv[0]
@@ -217,6 +236,18 @@ def main(argv=None):
                 its = [i for i in items if lo <= m(S, i, rs, 0) < hi]
                 if its:
                     row(nm, its)
+            for kn, k in (('time', 0), ('cycles', 2)):
+                b = band(d, ref, mode, k) if kn in ratio else None
+                if not b:
+                    continue
+                if arm == ref + '-aa':
+                    print(f'\nA/A control, {kn}: 95 % of statements within [{b[0]:.3f}, {b[1]:.3f}] of the reference against itself')
+                else:
+                    v = ratio[kn].values()
+                    print(
+                        f'\nOutside the A/A {kn} band [{b[0]:.3f}, {b[1]:.3f}]: {sum(1 for x in v if x > b[1])} slower, '
+                        f'{sum(1 for x in v if x < b[0])} faster, {sum(1 for x in v if b[0] <= x <= b[1])} within'
+                    )
             rt = sorted(ratio['time'].values())
             if rt:
                 q = lambda p: rt[min(len(rt) - 1, int(p * len(rt)))]
