@@ -14,6 +14,12 @@
 **     SG_EXEC=1: after each timing line, one exec line per counted execution, in order (run from 1), for warm-up vs
 **     steady state:
 **        exec stmt run alt wall_ms instructions cycles engine_ms
+**     SG_EXTRA=1 and SG_SPLIT=1 append seven columns to each exec line (-1 where off or unavailable), for where the wall
+**     time goes when user-mode cycles don't account for it:
+**        kernel_cycles branch_misses page_faults context_switches step_ms column_ms reset_ms
+**     SG_EXTRA's are kernel-mode cycles (perf_event_paranoid <= 1, or root), user-mode branch misses, and the
+**     execution's page faults and context switches; SG_SPLIT's are its time in the backend's step calls, in its column
+**     reads (with the hashing), and in the reset after it (outside ms), a clock read around each.
 **   rows <db> <project.q> <id> [limit]            the statement's normalised rows, one rows line each (disagreement reports)
 **   info                                          the backend's name, dialect and version: info backend dialect version
 ** Record tags were single letters before (C N T E R I; python/sqlgauntlet/lines.py reads both).
@@ -64,8 +70,9 @@ static int cmpd(const void *a, const void *b) {
 ** regions are callgrind's instead: collection toggled on and off around them, zeroed per statement, and dumped with the
 ** label "<id> <hot|prep> <executions>" (python/sqlgauntlet/cg.py puts the counts into the timing lines): deterministic
 ** instruction counts on any Linux, for statements too short to time. */
-static int perf_fd[2] = { -1, -1 };
-static void perf_open(void) {
+#define NPERF 6 /* (instructions, cycles; with SG_EXTRA kernel cycles, branch misses, page faults, context switches) */
+static int perf_fd[NPERF] = { -1, -1, -1, -1, -1, -1 };
+static void perf_open(int extra) {
 #ifdef __linux__
   static const unsigned long long cfg[2] = { PERF_COUNT_HW_INSTRUCTIONS, PERF_COUNT_HW_CPU_CYCLES };
   for (int i = 0; i < 2; i++) {
@@ -81,9 +88,34 @@ static void perf_open(void) {
     if (perf_fd[i] < 0) {
       fprintf(stderr, "sqlgauntlet: perf_event_open: counters unavailable\n");
       perf_fd[0] = perf_fd[1] = -1;
-      return;
+      break;
     }
   }
+  static const struct {
+    unsigned type;
+    unsigned long long config;
+    int kernel;
+  } x[NPERF - 2] = {
+    { PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES, 1 },
+    { PERF_TYPE_HARDWARE, PERF_COUNT_HW_BRANCH_MISSES, 0 },
+    { PERF_TYPE_SOFTWARE, PERF_COUNT_SW_PAGE_FAULTS, 2 },
+    { PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CONTEXT_SWITCHES, 2 },
+  };
+  for (int i = 0; extra && i < NPERF - 2; i++) { /* (kernel 1: kernel mode only; 2: both, as software events count) */
+    struct perf_event_attr a;
+    memset(&a, 0, sizeof a);
+    a.size = sizeof a;
+    a.type = x[i].type;
+    a.config = x[i].config;
+    a.disabled = 1;
+    a.exclude_kernel = x[i].kernel == 0;
+    a.exclude_user = x[i].kernel == 1;
+    a.exclude_hv = 1;
+    if ((perf_fd[i + 2] = (int)syscall(SYS_perf_event_open, &a, 0, -1, -1, 0)) < 0)
+      fprintf(stderr, "sqlgauntlet: perf_event_open: SG_EXTRA counter %d unavailable\n", i + 1);
+  }
+#else
+  (void)extra;
 #endif
 }
 static void perf_on(int on) {
@@ -94,7 +126,7 @@ static void perf_on(int on) {
     cg = on;
   }
 #elif defined(__linux__)
-  for (int i = 0; i < 2; i++)
+  for (int i = 0; i < NPERF; i++)
     if (perf_fd[i] >= 0) ioctl(perf_fd[i], on ? PERF_EVENT_IOC_ENABLE : PERF_EVENT_IOC_DISABLE, 0);
 #else
   (void)on;
@@ -109,7 +141,7 @@ static void perf_reset(void) {
 #ifdef SG_CALLGRIND
   CALLGRIND_ZERO_STATS;
 #elif defined(__linux__)
-  for (int i = 0; i < 2; i++)
+  for (int i = 0; i < NPERF; i++)
     if (perf_fd[i] >= 0) ioctl(perf_fd[i], PERF_EVENT_IOC_RESET, 0);
 #endif
 }
@@ -290,8 +322,8 @@ static void ntext(const sg_value *v, char *b, size_t n) { /* a normalised value 
 }
 
 /* one execution of a prepared statement (timed: steps and row reads only); writes inside BEGIN ... ROLLBACK */
-static double t_exec;
-static int show, rows_limit = -1;
+static double t_exec, t_step, t_col, t_reset; /* (t_step ... t_reset: SG_SPLIT's parts of the last execution) */
+static int show, rows_limit = -1, ssplit;
 static int exec1(Q *q, sg_stmt *st, R *r) {
   if (q->write) {
     B->step(s_begin);
@@ -302,8 +334,13 @@ static int exec1(Q *q, sg_stmt *st, R *r) {
   long n = 0;
   int rc;
   perf_on(1);
-  double t0 = now_ms();
+  double t0 = now_ms(), ta = t0, tb = t0;
+  t_step = t_col = 0;
   while ((rc = B->step(st)) == SG_ROW) {
+    if (ssplit) {
+      tb = now_ms();
+      t_step += tb - ta;
+    }
     unsigned long long rh = 1469598103934665603ULL, nrh = 1469598103934665603ULL;
     int nc = B->column_count(st);
     for (int i = 0; i < nc; i++) {
@@ -332,9 +369,14 @@ static int exec1(Q *q, sg_stmt *st, R *r) {
     nh = fnv(nh, &nrh, sizeof nrh);
     nhs += nrh * 0x9E3779B97F4A7C15ULL + (nrh >> 29);
     n++;
+    if (ssplit) {
+      ta = now_ms();
+      t_col += ta - tb;
+    }
   }
   t_exec = now_ms() - t0;
   perf_on(0);
+  if (ssplit) t_step += t0 + t_exec - ta;
   r->rows = n;
   r->h = h;
   r->hs = hs;
@@ -347,12 +389,26 @@ static int exec1(Q *q, sg_stmt *st, R *r) {
   r->engine_ms = es.engine_ms;
   r->err[0] = 0;
   if (rc != SG_DONE) snprintf(r->err, sizeof r->err, "%s", B->errmsg(db));
-  B->reset(st);
+  if (ssplit) {
+    tb = now_ms();
+    B->reset(st);
+    t_reset = now_ms() - tb;
+  } else B->reset(st);
   if (q->write) {
     B->step(s_rollback);
     B->reset(s_rollback);
   }
   return rc == SG_DONE ? 0 : 1;
+}
+/* one exec line's numbers: the counters' deltas since p0 (-1 where a counter is off), and SG_SPLIT's parts */
+struct E {
+  int alt;
+  double ms, ins, cyc, eng, x[NPERF - 2], step, col, rst;
+};
+static void exrec(struct E *e, int alt, double ms, double eng, const long long *p0) {
+  double d[NPERF];
+  for (int j = 0; j < NPERF; j++) d[j] = perf_fd[j] < 0 ? -1 : (double)(perf_read(j) - p0[j]);
+  *e = (struct E){ alt, ms, d[0], d[1], eng, { d[2], d[3], d[4], d[5] }, ssplit ? t_step : -1, ssplit ? t_col : -1, ssplit ? t_reset : -1 };
 }
 static int prep(Q *q, sg_stmt **st, R *r) {
   if (!(*st = B->prepare(db, q->sql, err, sizeof err))) {
@@ -499,6 +555,8 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
   const char *mode = argv[1];
   show = getenv("SG_ROWS") != 0;
   int sexec = getenv("SG_EXEC") && atoi(getenv("SG_EXEC")) > 0;
+  int sextra = sexec && getenv("SG_EXTRA") && atoi(getenv("SG_EXTRA")) > 0;
+  ssplit = sexec && getenv("SG_SPLIT") && atoi(getenv("SG_SPLIT")) > 0;
   if (getenv("SG_DIGITS")) digits = atoi(getenv("SG_DIGITS"));
   if (!(db = B->open(argv[2], err, sizeof err))) {
     fprintf(stderr, "sqlgauntlet: open %s: %s\n", argv[2], err);
@@ -540,12 +598,9 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
   double budget = argc > 5 && !check && !rows ? atof(argv[5]) : 100;
   const char *only = check ? (argc > 4 ? argv[4] : 0) : rows ? argv[4] : (argc > 6 ? argv[6] : 0);
   int minr = getenv("SG_MIN_REPS") ? atoi(getenv("SG_MIN_REPS")) : 3;
-  if (!check && !rows) perf_open();
+  if (!check && !rows) perf_open(sextra);
   double *t = malloc(sizeof *t * (size_t)(reps + 1));
-  struct E {
-    int alt;
-    double ms, ins, cyc, eng;
-  } *ex = sexec ? malloc(sizeof *ex * (size_t)(reps + 1)) : 0;
+  struct E *ex = sexec ? malloc(sizeof *ex * (size_t)(reps + 1)) : 0;
   for (int i = 0; i < nq; i++) {
     Q *q = &qs[i];
     if (only && strcmp(only, q->id)) continue;
@@ -605,14 +660,13 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         first = t_exec;
         perf_reset();
         for (int k = 0; k < reps && (k < minr || spent < budget) && !r0.err[0]; k++) {
-          long long i0 = ex ? perf_read(0) : 0, c0 = ex ? perf_read(1) : 0;
+          long long p0[NPERF];
+          for (int j = 0; ex && j < NPERF; j++) p0[j] = perf_read(j);
           exec1(q, st, &r);
           t[nt] = t_exec;
           spent += t_exec;
           alt += r.alt;
-          if (ex)
-            ex[nt] =
-              (struct E){ r.alt, t_exec, perf_fd[0] < 0 ? -1 : (double)(perf_read(0) - i0), perf_fd[1] < 0 ? -1 : (double)(perf_read(1) - c0), r.engine_ms };
+          if (ex) exrec(&ex[nt], r.alt, t_exec, r.engine_ms, p0);
           nt++;
         }
         B->finalize(st);
@@ -624,7 +678,8 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         first = now_ms() - t0;
         perf_reset();
         for (int k = 0; k < reps && (k < minr || spent < budget) && !r0.err[0]; k++) {
-          long long i0 = ex ? perf_read(0) : 0, c0 = ex ? perf_read(1) : 0;
+          long long p0[NPERF];
+          for (int j = 0; ex && j < NPERF; j++) p0[j] = perf_read(j);
           perf_on(1);
           t0 = now_ms();
           prep(q, &st, &r);
@@ -636,9 +691,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
           B->finalize(st);
           t[nt] = tp + t_exec + (now_ms() - t0);
           perf_on(0);
-          if (ex)
-            ex[nt] =
-              (struct E){ r.alt, t[nt], perf_fd[0] < 0 ? -1 : (double)(perf_read(0) - i0), perf_fd[1] < 0 ? -1 : (double)(perf_read(1) - c0), r.engine_ms };
+          if (ex) exrec(&ex[nt], r.alt, t[nt], r.engine_ms, p0);
           spent += t[nt++];
           alt += r.alt;
         }
@@ -656,11 +709,14 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
 #endif
         qsort(t, (size_t)nt, sizeof *t, cmpd);
         clean(r0.err);
-        printf("timing\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first,
-               nt ? sum / nt : first, nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, alt, nt,
-               r0.err[0] ? r0.err : "-");
-        for (int k = 0; ex && k < nt; k++)
-          printf("exec\t%s\t%d\t%d\t%.5f\t%.0f\t%.0f\t%.5f\n", q->id, k + 1, ex[k].alt, ex[k].ms, ex[k].ins, ex[k].cyc, ex[k].eng);
+        printf("timing\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first, nt ? sum / nt : first,
+               nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, alt, nt, r0.err[0] ? r0.err : "-");
+        for (int k = 0; ex && k < nt; k++) {
+          printf("exec\t%s\t%d\t%d\t%.5f\t%.0f\t%.0f\t%.5f", q->id, k + 1, ex[k].alt, ex[k].ms, ex[k].ins, ex[k].cyc, ex[k].eng);
+          if (sextra || ssplit)
+            printf("\t%.0f\t%.0f\t%.0f\t%.0f\t%.5f\t%.5f\t%.5f", ex[k].x[0], ex[k].x[1], ex[k].x[2], ex[k].x[3], ex[k].step, ex[k].col, ex[k].rst);
+          putchar('\n');
+        }
       }
       fflush(stdout);
       continue;

@@ -161,6 +161,13 @@ def main(argv=None):
     a.add_argument('--budget', type=float, default=60)
     a.add_argument('--modes', default='hot,prep')
     a.add_argument('--exec-lines', action='store_true')
+    a.add_argument(
+        '--extra-counters',
+        action='store_true',
+        help='speed: exec lines with kernel cycles, branch misses, page faults, context switches (SG_EXTRA)',
+    )
+    a.add_argument('--split', action='store_true', help='speed: exec lines with the time in step, column reads and reset (SG_SPLIT; implies --exec-lines)')
+    a.add_argument('--min-reps', type=int, help='speed: executions each statement gets whatever the budget (SG_MIN_REPS; the driver\'s default is 3)')
     a.add_argument('--callgrind', action='store_true', help='speed: instructions from valgrind (make callgrind; so arms)')
     a.add_argument('--scale', default='1')
     a.add_argument('--ids')
@@ -222,6 +229,10 @@ def main(argv=None):
         rounds=o.rounds,
         reps=o.reps,
         budget_ms=o.budget,
+        min_reps=o.min_reps,
+        exec_lines=bool(o.exec_lines or o.extra_counters or o.split),
+        extra_counters=o.extra_counters,
+        split=o.split,
         scale=o.scale,
         statements=sum(1 for p in projects for l in open(q / f'{p}.q') if l.startswith('@@Q ')),
     )
@@ -254,14 +265,20 @@ def main(argv=None):
         cgdriver = str(ROOT / 'build' / 'callgrind' / 'sqlgauntlet')
         if o.callgrind and not os.path.exists(cgdriver):
             sys.exit('sqlgauntlet-run: --callgrind needs make callgrind (Linux, valgrind)')
-        extra = {'SG_EXEC': '1'} if o.exec_lines else {}
+        extra = {'SG_EXEC': '1'} if o.exec_lines or o.extra_counters or o.split else {}
+        if o.extra_counters:
+            extra['SG_EXTRA'] = '1'
+        if o.split:
+            extra['SG_SPLIT'] = '1'
+        if o.min_reps:
+            extra['SG_MIN_REPS'] = str(o.min_reps)
         files = {}
         for r in range(o.r0, o.r0 + o.rounds):
             t0 = time.time()
             for arm in arms:
                 for m in modes:
                     files[arm.name, m, r] = open(out / f'{arm.name}.{m}.{r}.tsv', 'w')
-                    files[arm.name, m, r].write(L.header('timing', 'exec'))
+                    files[arm.name, m, r].write(L.header('timing', 'exec', exec_more='SG_EXTRA' in extra or 'SG_SPLIT' in extra))
                     files[arm.name, m, r].flush()
             for k, p in enumerate(projects):
                 n = len(arms)
