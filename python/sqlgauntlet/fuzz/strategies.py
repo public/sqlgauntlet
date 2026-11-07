@@ -47,6 +47,8 @@ def lit(v):
         return repr(v)
     if isinstance(v, bytes):
         return "x'" + v.hex() + "'"
+    if '\x00' in v:  # (SQL text ends at a NUL, so such text can't be quoted: its UTF-8 bytes, cast)
+        return "CAST(x'" + v.encode('utf-8', 'surrogatepass').hex() + "' AS TEXT)"
     return "'" + v.replace("'", "''") + "'"
 
 
