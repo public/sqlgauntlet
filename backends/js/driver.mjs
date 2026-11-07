@@ -37,7 +37,7 @@ async function load(b) {
             st.setReadBigInts(true);
             st.setReturnArrays(true);
             st.setAllowBareNamedParameters(false);
-            return { all: (named, pos) => (named ? st.all(named, ...pos) : st.all(...pos)), close() {} };
+            return { all: (named, pos, numbered) => (named ? st.all(named, ...(numbered || pos)) : st.all(...pos)), close() {} };
           },
           changes: () => Number(db.prepare('SELECT changes() c').get().c),
         };
@@ -56,7 +56,7 @@ async function load(b) {
           prepare(s) {
             const st = db.prepare(s);
             return {
-              all: (named, pos) => (named && pos.length ? st.values(named, ...pos) : named ? st.values(named) : st.values(...pos)),
+              all: (named, pos) => (pos.length ? st.values(...pos) : named ? st.values(named) : st.values()),
               close: () => st.finalize(),
             };
           },
@@ -80,8 +80,8 @@ async function load(b) {
             return {
               all(named, pos) {
                 st.reset();
-                if (named && pos.length) throw new Error('sqlgauntlet: sql.js binds named or positional parameters, not both');
-                if (named || pos.length) st.bind(named || pos);
+                if (pos.length) st.bind(pos); // (by index, named ones included)
+                else if (named) st.bind(named);
                 const rows = [];
                 while (st.step()) rows.push(st.get(null, { useBigInt: true }));
                 return rows;
@@ -116,8 +116,8 @@ async function load(b) {
             return {
               all(named, pos) {
                 st.reset(true);
-                if (named) for (const [k, v] of Object.entries(named)) st.bind(k, v);
-                pos.forEach((v, i) => { if (v !== undefined) st.bind(i + 1, v); });
+                if (pos.length) pos.forEach((v, i) => st.bind(i + 1, v)); // (by index, named ones included)
+                else if (named) for (const [k, v] of Object.entries(named)) st.bind(k, v);
                 const rows = [];
                 while (st.step()) {
                   const r = [];
@@ -239,7 +239,7 @@ function exec1(c, q, st, args, rowsOut) {
   if (q.write) c.exec('BEGIN');
   const r = { rows: 0, h: 0n, hs: 0n, nh: 0n, nhs: 0n, changes: 0, err: '' };
   let rows = [];
-  try { rows = st.all(args.named, args.pos); } catch (e) { r.err = errmsg(e); }
+  try { rows = st.all(args.named, args.pos, args.numbered); } catch (e) { r.err = errmsg(e); }
   const H0 = new H(), N0 = new H();
   for (const row of rows) {
     const rh = new H(), nrh = new H();
@@ -266,9 +266,36 @@ function exec1(c, q, st, args, rowsOut) {
   if (q.write) { try { c.exec('ROLLBACK'); } catch {} }
   return r;
 }
+function paramsOf(sql) { // the parameters the SQL text uses (outside strings, quoted names and comments): the bound
+  // ones the C driver would find through sqlite3_bind_parameter_index/count; the corpus may list more than are used
+  const named = new Map(); // (name -> its index: SQLite gives a name the next free index where it first appears)
+  let n = 0, i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
+      const end = ch === '[' ? ']' : ch;
+      i++;
+      while (i < sql.length && !(sql[i] === end && sql[i + 1] !== end)) i += sql[i] === end ? 2 : 1;
+      i++;
+    } else if (ch === '-' && sql[i + 1] === '-') { while (i < sql.length && sql[i] !== '\n') i++; }
+    else if (ch === '/' && sql[i + 1] === '*') { const e = sql.indexOf('*/', i + 2); i = e < 0 ? sql.length : e + 2; }
+    else if (ch === '?') {
+      let j = i + 1;
+      while (j < sql.length && sql[j] >= '0' && sql[j] <= '9') j++;
+      n = j > i + 1 ? Math.max(n, parseInt(sql.slice(i + 1, j), 10)) : n + 1;
+      i = j;
+    } else if ((ch === ':' || ch === '@' || ch === '$') && /[A-Za-z_]/.test(sql[i + 1] || '')) {
+      let j = i + 1;
+      while (j < sql.length && /[A-Za-z0-9_]/.test(sql[j])) j++;
+      const k = sql.slice(i, j);
+      if (!named.has(k)) named.set(k, ++n);
+      i = j;
+    } else i++;
+  }
+  return { named, count: n };
+}
 function evalParams(c, q) { // each literal through the binding: its value, as an app would hand it over
   const named = {}, pos = [];
-  let any = false;
   for (const [name, lit] of q.params) {
     let v;
     try {
@@ -279,10 +306,16 @@ function evalParams(c, q) { // each literal through the binding: its value, as a
       v = rows[0][0];
     } catch { continue; } // (left unbound: the engine cannot evaluate the literal)
     if (name[0] === '?') pos[parseInt(name.slice(1), 10) - 1] = v;
-    else { named[name] = v; any = true; }
+    else named[name] = v;
   }
-  for (let i = 0; i < pos.length; i++) if (pos[i] === undefined) pos[i] = null;
-  return { named: any ? named : null, pos };
+  const use = paramsOf(q.sql); // (only what the statement has: a binding refuses extra values, the C driver skips them)
+  for (const k of Object.keys(named)) if (!use.named.has(k)) delete named[k];
+  const full = []; // (every parameter by its SQLite index, numbered and named)
+  for (let i = 0; i < use.count; i++) full[i] = pos[i] === undefined ? null : pos[i];
+  for (const [k, ix] of use.named) if (k in named) full[ix - 1] = named[k];
+  const nix = new Set(use.named.values());
+  const numbered = full.filter((_, i) => !nix.has(i + 1)); // (node binds positional values to the unnamed ones, in order)
+  return { named: Object.keys(named).length ? named : null, pos: full, numbered };
 }
 
 async function main() {
