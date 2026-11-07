@@ -36,6 +36,43 @@ cd python && python3 -m sqlgauntlet.run speed --arm sqlite --arm libsql --rounds
 runs use the 1,245 committed statements. Results go to `build/run/` (or `--out`): one TSV per arm and mode, plus
 `env.json`. The Markdown report is printed on stdout.
 
+## The corpus at a glance
+
+The corpus is the point of sqlgauntlet: statements real applications send to SQLite, copied from their source at a
+pinned commit, not benchmark queries written for an engine. The numbers below are for the 1,245 statements committed
+here, from 42 applications; `corpus/fetch.sh` adds 62 more from two apps whose licences keep them out of the
+repository (1,307 from 44 in all).
+
+| | |
+|---|---:|
+| statements | 1,245 (1,070 reads, 175 writes) |
+| applications | 42, 20 to 35 statements each, every one with its repository, commit and `file:line` |
+| SQL | 722 KB, 8,290 lines; median statement 311 bytes, longest 9.9 KB |
+| bytecode | 262,199 VDBE ops in all; median 77 per statement, largest 17,379 |
+| rows returned | 1.94 million at scale 1; the largest result 140,788 rows |
+| stock SQLite time | 82 s for one pass (indicative); median 0.9 ms, 289 statements under 0.1 ms, 56 at 100 ms or more |
+| licences | MIT 297, AGPL 338, GPL 267, Apache 182, MPL 66, EUPL 60, BSD 35: each kept with its own app |
+
+They are not toy queries:
+- 41% join three or more tables, 38% have a subquery (14% correlated), 44% need a temporary B-tree for sorting or
+  grouping, and 40% scan a whole table;
+- 59% are built at runtime by the app (ORMs, query builders, string concatenation), 66% are on a hot path such as a
+  page load, a keystroke or a sync loop, and 18% are microsecond point lookups where per-call overhead is everything;
+- there are window functions, recursive CTEs, FTS4/FTS5 `MATCH`, JSON functions, `COLLATE NOCASE`, upserts,
+  `RETURNING`, virtual tables and the odd `REGEXP` (corpus/STATS.md has every tag).
+
+Some favourites:
+
+| statement | what it is | why it's interesting |
+|---|---|---|
+| `grocy.mealplan.recipes_resolved_week` | grocy's meal-plan page: recipe fulfilment over a 13-day window | 17,379 VDBE ops and 552 table accesses through nested views; 10-15 s on stock SQLite, as grocy users report (grocy#2992). One of five tagged `heavy`. |
+| `zotero.items.primary_data` | loading Zotero's item tree | 9.9 KB of SQL: a 10-way LEFT JOIN with dozens of correlated subqueries per row building each item's first creator; 24,356 rows |
+| `firefox.autofill.origin_history_bookmark` | URL-bar autofill, run on every keystroke | four window aggregates over a CTE, a correlated subquery, then a hash probe, in 3.5 ms |
+| `joplin.search.fts_notebook_tag_text` | Joplin's filtered full-text search | a recursive notebook walk and an `INTERSECT` of tags feeding FTS4 `MATCH` with `offsets()` and `matchinfo()` |
+| `technitium.querylogs.page.last_page` | jumping to the last page of a DNS query log | `OFFSET` skips about 250,000 rows to return 25 (Technitium DnsServer#563) |
+| `chromium.history.batch_recent_visits_significant` | rebuilding the omnibox index | 65 VDBE ops that return 140,788 rows: almost all the time is moving rows |
+| `firefox.utils.bookmarks_tree` | bookmark backups and sync | a recursive descendants CTE with a per-row icon subquery, ordered by depth |
+
 ## Design
 
 ```
