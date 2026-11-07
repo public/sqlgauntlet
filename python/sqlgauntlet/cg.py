@@ -1,6 +1,8 @@
-"""cg: the driver's T lines with the instructions per execution taken from callgrind's dumps (the driver built with
+"""cg: the driver's timing lines with the instructions per execution taken from callgrind's dumps (the driver built with
 -DSG_CALLGRIND, make callgrind: one dump per statement and mode, labelled "<id> <mode> <executions>", its Ir the counted
 regions only), and cycles -1; the rest as the driver printed it. A statement without a dump keeps -1."""
+
+from . import lines as L
 
 VALGRIND = ['valgrind', '--tool=callgrind', '--collect-atstart=no', '--dump-line=no']
 
@@ -22,11 +24,11 @@ def totals(dumps):
 
 
 def apply(lines, dumps):
-    """the T lines of lines (an iterable of output lines) with callgrind's counts"""
+    """the timing lines of lines (an iterable of output lines) with callgrind's counts"""
     ir = totals(dumps)
     for line in lines:
-        p = line.rstrip('\n').split('\t')
-        if p[0] == 'T' and len(p) >= 12:
+        p = L.split(line)
+        if p[0] == 'timing' and len(p) >= 12:
             n, k = ir.get(p[1], (None, 0))
             p[8] = f'{n / k:.1f}' if n is not None and k else '-1'
             p[9] = '-1'

@@ -1,11 +1,11 @@
-"""norm: result rows normalised for comparing engines, as the driver's N lines are (no dependencies: tests use it)"""
+"""norm: result rows normalised for comparing engines, as the driver's norm lines are (no dependencies: tests use it)"""
 
 import decimal
 import math
 
 
 def norm(v):
-    """a tagged value, normalised as the driver's N lines are"""
+    """a tagged value, normalised as the driver's norm lines are"""
     if v is None:
         return None
     k, x = v

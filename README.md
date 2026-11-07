@@ -48,7 +48,7 @@ runs use the 1,245 committed statements. Results go to `build/run/` (or `--out`)
  sqlgauntlet --backend <b>.so <mode>   src/driver.c over include/sqlgauntlet.h
     │                                  (or any program with the same command line: an "exe" arm)
     ▼
- <arm>.check.tsv, <arm>.<hot|prep>.<round>.tsv     C / N / T / E lines
+ <arm>.check.tsv, <arm>.<hot|prep>.<round>.tsv     check / norm / timing / exec lines
     │  compare.py, summarise.py
     ▼
  Markdown: disagreements, timings
@@ -70,7 +70,7 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 - **Networked engines (client adapters)** fill the same table with a client: `open` connects, `prepare` is a
   server-side prepare, `step` fetches the next row. Their `exec_stats` returns `engine_ms`, the server's own measure
   of the execution: PostgreSQL's `pg_stat_statements` delta or `EXPLAIN (ANALYZE)`, MySQL's `performance_schema`
-  statement timers. The driver times the wall span as for any backend and prints `engine-ms` on each E line, so
+  statement timers. The driver times the wall span as for any backend and prints `engine_ms` on each exec line, so
   `wall − engine` is the protocol and client cost. No client adapter is written yet.
 - **The alternative path** (`alt_path`): an engine with more than one way to run a statement reports which one it
   took. Examples are a compiled or specialised plan, a JIT, or a result cache. The driver counts these executions
@@ -83,18 +83,21 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 |---|---|---|
 | `build` | the app's database from its build script | |
 | `load` | a data file (`tbl`, `csv`, or `csvn`, where an unquoted `\N` is NULL) into a table, through the backend's prepare and bind, every field as text | |
-| `check` | each statement 8 times: 6 on one handle, then 2 freshly prepared; the runs must agree with each other | `C id status rows changes hash msethash alt/runs error`, `N id nhash nmsethash` |
-| `hot` | prepared once, then 1 + reps executions (reset between), until `budget-ms` is spent | `T id rows hash first-ms median-ms mean-ms runs instr cycles alt/runs error` |
-| `prep` | every execution prepares, binds, steps and finalizes | the same T line |
-| `rows` | one statement's normalised rows (for reading a disagreement) | `R` |
-| `info` | the backend's name, dialect and version | `I` |
+| `check` | each statement 8 times: 6 on one handle, then 2 freshly prepared; the runs must agree with each other | `check stmt status rows changes hash multiset_hash alt/runs error`, `norm stmt norm_hash norm_multiset_hash` |
+| `hot` | prepared once, then 1 + reps executions (reset between), until `budget-ms` is spent | `timing stmt rows hash first_ms median_ms mean_ms runs instructions cycles alt/runs error` |
+| `prep` | every execution prepares, binds, steps and finalizes | the same timing line |
+| `rows` | one statement's normalised rows (for reading a disagreement) | `rows` |
+| `info` | the backend's name, dialect and version | `info backend dialect version` |
 
 - **Writes:** each write runs inside `BEGIN … ROLLBACK`, outside the timed span. Reads run in autocommit.
 - **Parameters:** each backend evaluates the corpus's literal parameters itself and binds them by name, or by position
   for anonymous `?`.
 - **Counters:** on Linux, user-mode instructions and cycles come from `perf_event_open` over the timed spans
   (`perf_event_paranoid ≤ 2`); elsewhere they are -1.
-- **E lines:** `SG_EXEC=1` prints one per execution: `E id k alt ms instr cycles engine-ms`.
+- **Exec lines:** `SG_EXEC=1` prints one per execution: `exec stmt run alt wall_ms instructions cycles engine_ms`.
+- **Readable files:** sqlgauntlet-run starts every .tsv with a `#` line per record type naming its columns, e.g.
+  `# exec stmt run alt wall_ms instructions cycles engine_ms`. The record tags were single letters before
+  (`C N T E R I`); `python/sqlgauntlet/lines.py` reads both, so older results still parse.
 - **Callgrind:** `make callgrind` builds the CLI with `-DSG_CALLGRIND`. `sqlgauntlet-run speed --callgrind` then counts
   instructions under valgrind, collecting only around the timed spans, and dumping once per statement and mode. The
   counts are deterministic on any Linux, so they can measure statements too short to time.
@@ -102,9 +105,9 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 ### Correctness: normalisation and verdicts (`python/sqlgauntlet/compare.py`)
 
 Every result is hashed twice:
-- **Strict** (`hash`, `msethash`): each value's kind and bytes. This is for engines that must match each other exactly,
+- **Strict** (`hash`, `multiset_hash`): each value's kind and bytes. This is for engines that must match each other exactly,
   such as a fork or a patched build against its base.
-- **Normalised** (`nhash`, `nmsethash`):
+- **Normalised** (`norm_hash`, `norm_multiset_hash`):
   - **Numbers:** integers and floats are one kind. A float with an exact integer value within 2^53 counts as that
     integer; other floats are rounded to `SG_DIGITS` significant digits (default 12).
   - **Text and blobs** keep their bytes and their kind, and NULL is NULL. So `3` and `3.0` agree, and `'3'` and `3`
@@ -140,7 +143,7 @@ The report lists:
 
 - **Arms in the same run, interleaved.** Builds measured one after another drift with run order. In each round, every
   app's database is copied once per arm, and the arms run it in an order rotated by round and app.
-- **Warm-up apart from steady state.** With E lines, an execution is warm-up while the arm is still changing paths.
+- **Warm-up apart from steady state.** With exec lines, an execution is warm-up while the arm is still changing paths.
   The rest is steady state. Steady-state ratios need 3 or more steady executions on both sides, because fewer
   measures warm-up. The first execution (prepare plus first run) is reported separately.
 - **Instructions, cycles and time.** Instructions are the steady measure for microsecond statements, so decide on

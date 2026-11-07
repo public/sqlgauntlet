@@ -10,7 +10,7 @@ from pathlib import Path
 
 R = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(R / 'python'))
-from sqlgauntlet import compare  # noqa: E402
+from sqlgauntlet import compare, lines  # noqa: E402
 
 APPS = os.environ.get('TEST_APPS', 'memos atuin beets').split()
 O = R / 'build' / 'test'
@@ -38,9 +38,9 @@ for i, s in S.items():
     elif compare.verdict(s, L[i], ordered[i], 'wallclock' in tags[i]) != 'same':
         print(f'smoke: libsql differs on {i} ({compare.verdict(s, L[i], ordered[i], "wallclock" in tags[i])})')
 subprocess.run(run[:3] + ['speed', APPS[0], '--reps', '5', '--budget', '2'] + run[3:] + arms[:2], check=True, env=env)
-T = [line for line in open(O / 'sqlite.hot.1.tsv') if line.startswith('T')]
+T = [line for line in open(O / 'sqlite.hot.1.tsv') if lines.split(line)[0] == 'timing']
 if not T:
-    fail.append('speed: no T lines')
+    fail.append('speed: no timing lines')
 print(f'smoke: {len(S)} statements, {len(exp)} with manifest counts, {len(fail)} failures')
 for f in fail:
     print('  ' + f)

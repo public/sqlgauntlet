@@ -4,22 +4,24 @@
 **   load <db> <table> <file> <tbl|csv>            a data file into a table (load() below; workloads' load.tsv)
 **   check <db> <project.q> [only-id]              each statement 6 times on one handle, then twice freshly prepared:
 **        (a statement tagged wallclock agrees with itself by row count: its values follow the clock)
-**        C id status rows changes hash msethash alt/runs error      status ok | err | unstable (runs disagree)
-**        N id nhash nmsethash                      the same rows normalised (below), for comparing different engines
+**        check stmt status rows changes hash multiset_hash alt/runs error   status ok | err | unstable (runs disagree)
+**        norm stmt norm_hash norm_multiset_hash    the same rows normalised (below), for comparing different engines
 **   hot|prep <db> <project.q> [reps] [budget-ms] [only-id]   timing:
-**        T id rows hash first-ms median-ms mean-ms runs instr cycles alt/runs error
+**        timing stmt rows hash first_ms median_ms mean_ms runs instructions cycles alt/runs error
 **     hot: prepared once, then 1 + reps executions (reset between); prep: every execution prepares, binds, steps and
 **     finalizes. reps stop early once budget-ms is spent (at least SG_MIN_REPS, default 3). instr, cycles: user mode,
 **     per execution (Linux perf_event_open; -1 elsewhere or when the kernel refuses).
-**     SG_EXEC=1: after each T line, one E line per counted execution, in order (k from 1), for warm-up vs steady state:
-**        E id k alt ms instr cycles engine-ms
-**   rows <db> <project.q> <id> [limit]            the statement's normalised rows, one R line each (disagreement reports)
-**   info                                          the backend's name, dialect and version: I name dialect version
-** hash and msethash are FNV-1a over each value's kind and bytes. alt/runs: of the runs, how many the backend reported on
+**     SG_EXEC=1: after each timing line, one exec line per counted execution, in order (run from 1), for warm-up vs
+**     steady state:
+**        exec stmt run alt wall_ms instructions cycles engine_ms
+**   rows <db> <project.q> <id> [limit]            the statement's normalised rows, one rows line each (disagreement reports)
+**   info                                          the backend's name, dialect and version: info backend dialect version
+** Record tags were single letters before (C N T E R I; python/sqlgauntlet/lines.py reads both).
+** hash and multiset_hash are FNV-1a over each value's kind and bytes. alt/runs: of the runs, how many the backend reported on
 ** its alternative path (sg_exec_stats.alt_path; 0 for a backend without one).
 ** Reads run in autocommit; writes inside BEGIN ... ROLLBACK, outside the timed span. hash: the rows in order;
-** msethash: the rows as a multiset.
-** Normalised values (N lines, rows): integers and floats are one kind, numbers; a float with an exact integer value
+** multiset_hash: the rows as a multiset.
+** Normalised values (norm lines, rows): integers and floats are one kind, numbers; a float with an exact integer value
 ** within 2^53 hashes as that integer, any other float as its value rounded to SG_DIGITS significant digits (default
 ** 12); text and blobs keep their bytes and their kind; NULL is NULL. So 3 and 3.0 agree, 0.1+0.2 and 0.3 agree, '3' and
 ** 3 do not. */
@@ -60,7 +62,7 @@ static int cmpd(const void *a, const void *b) {
 
 /* user-mode instructions and cycles over the timed spans. Built with -DSG_CALLGRIND (make callgrind) the counted
 ** regions are callgrind's instead: collection toggled on and off around them, zeroed per statement, and dumped with the
-** label "<id> <hot|prep> <executions>" (python/sqlgauntlet/cg.py puts the counts into the T lines): deterministic
+** label "<id> <hot|prep> <executions>" (python/sqlgauntlet/cg.py puts the counts into the timing lines): deterministic
 ** instruction counts on any Linux, for statements too short to time. */
 static int perf_fd[2] = { -1, -1 };
 static void perf_open(void) {
@@ -487,7 +489,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
     return 2;
   }
   if (argc >= 2 && !strcmp(argv[1], "info")) {
-    printf("I\t%s\t%s\t%s\n", B->name, B->dialect, B->version ? B->version() : "-");
+    printf("info\t%s\t%s\t%s\n", B->name, B->dialect, B->version ? B->version() : "-");
     return 0;
   }
   if (argc < 4) {
@@ -554,13 +556,13 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
     sg_stmt *st = 0;
     if (rows) {
       rows_limit = argc > 5 ? atoi(argv[5]) : 20;
-      printf("R\t%s\n", q->id);
+      printf("rows\t%s\n", q->id);
       fflush(stdout);
       if (!prep(q, &st, &r0)) {
         exec1(q, st, &r0);
         B->finalize(st);
       }
-      printf("R\t%s\t%ld rows\t%s\n", q->id, r0.rows, r0.err[0] ? r0.err : "-");
+      printf("rows\t%s\t%ld rows\t%s\n", q->id, r0.rows, r0.err[0] ? r0.err : "-");
       rows_limit = -1;
       continue;
     }
@@ -592,8 +594,8 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
       }
       if (st) B->finalize(st);
       clean(r0.err);
-      printf("C\t%s\t%s\t%ld\t%ld\t%016llx\t%016llx\t%d/%d\t%s\n", q->id, status, r0.rows, r0.changes, r0.h, r0.hs, alt, runs, r0.err[0] ? r0.err : "-");
-      printf("N\t%s\t%016llx\t%016llx\n", q->id, r0.nh, r0.nhs);
+      printf("check\t%s\t%s\t%ld\t%ld\t%016llx\t%016llx\t%d/%d\t%s\n", q->id, status, r0.rows, r0.changes, r0.h, r0.hs, alt, runs, r0.err[0] ? r0.err : "-");
+      printf("norm\t%s\t%016llx\t%016llx\n", q->id, r0.nh, r0.nhs);
     } else {
       int nt = 0, alt = 0;
       double spent = 0, first;
@@ -654,16 +656,17 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
 #endif
         qsort(t, (size_t)nt, sizeof *t, cmpd);
         clean(r0.err);
-        printf("T\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first, nt ? sum / nt : first,
-               nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, alt, nt, r0.err[0] ? r0.err : "-");
+        printf("timing\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first,
+               nt ? sum / nt : first, nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, alt, nt,
+               r0.err[0] ? r0.err : "-");
         for (int k = 0; ex && k < nt; k++)
-          printf("E\t%s\t%d\t%d\t%.5f\t%.0f\t%.0f\t%.5f\n", q->id, k + 1, ex[k].alt, ex[k].ms, ex[k].ins, ex[k].cyc, ex[k].eng);
+          printf("exec\t%s\t%d\t%d\t%.5f\t%.0f\t%.0f\t%.5f\n", q->id, k + 1, ex[k].alt, ex[k].ms, ex[k].ins, ex[k].cyc, ex[k].eng);
       }
       fflush(stdout);
       continue;
     bad:
       clean(r0.err);
-      printf("T\t%s\t0\t0\t0\t0\t0\t0\t-1\t-1\t0/0\t%s\n", q->id, r0.err);
+      printf("timing\t%s\t0\t0\t0\t0\t0\t0\t-1\t-1\t0/0\t%s\n", q->id, r0.err);
       continue;
     }
     fflush(stdout);

@@ -11,7 +11,7 @@ sqlgauntlet-run check: every statement 8 times per arm (the driver's check mode)
   project -> <out>/<arm>.check.tsv, then compare's report.
 sqlgauntlet-run speed: --rounds rounds; in each, every project's database is copied once per arm and the arms run it in
   an order rotated by round and project (so no arm is always first or always last on a warm cache), hot then prep ->
-  <out>/<arm>.<mode>.<round>.tsv (SG_EXEC=1: per-execution E lines, for the warm-up/steady-state split), then
+  <out>/<arm>.<mode>.<round>.tsv (SG_EXEC=1: per-execution exec lines, for the warm-up/steady-state split), then
   summarise's report.
 The box, kernel, compiler and every arm's build options and version go to <out>/env.json with the results."""
 
@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 from . import cg
+from . import lines as L
 from . import prep as P
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -232,13 +233,15 @@ def main(argv=None):
         for arm in arms:
             t0 = time.time()
             with open(out / f'{arm.name}.check.tsv', 'w') as f:
+                f.write(L.header('check', 'norm'))
+                f.flush()
                 qa, da = dirs[arm.dialect]
                 for p in projects:
                     if not (da / f'{p}.db').exists():
                         continue
                     shutil.copyfile(da / f'{p}.db', c)
                     arm.run(['check', c, qa / f'{p}.q'], out=f)
-            n = sum(1 for l in open(out / f'{arm.name}.check.tsv') if l.startswith('C'))
+            n = sum(1 for l in open(out / f'{arm.name}.check.tsv') if L.split(l)[0] == 'check')
             print(
                 f'sqlgauntlet-run check: {arm.name}: {n} statements, {time.time() - t0:.0f} s',
                 file=sys.stderr,
@@ -258,6 +261,8 @@ def main(argv=None):
             for arm in arms:
                 for m in modes:
                     files[arm.name, m, r] = open(out / f'{arm.name}.{m}.{r}.tsv', 'w')
+                    files[arm.name, m, r].write(L.header('timing', 'exec'))
+                    files[arm.name, m, r].flush()
             for k, p in enumerate(projects):
                 n = len(arms)
                 order = [arms[(j + r + k) % n] for j in range(n)]
