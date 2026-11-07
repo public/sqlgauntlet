@@ -4,7 +4,8 @@
 #   make sqlite-versions                every version in SQLITE_VERSIONS, one build at a time
 #   make sqlite-variants                the reference's source with each option set in SQLITE_VARIANTS, as sqlite-<variant>
 # Versions: what the platforms apps run on ship (Ubuntu 22.04 3.37.2, Debian 12 3.40.1, Ubuntu 24.04 3.45.1, Debian 13
-# 3.46.1, libSQL's base 3.47) and the last release of each line since.
+# 3.46.1, libSQL's base 3.47) and the last release of each line since. -DSQLITE_ENABLE_JSON1: JSON is built in from 3.38;
+# before that it is this option, which distributions set (Ubuntu 22.04's 3.37.2 has it); a no-op from 3.38.
 SQLITE_VERSIONS ?= 3.35.5 3.37.2 3.40.1 3.45.1 3.46.1 3.47.2 3.49.2 3.50.4 3.51.3 3.52.0 3.53.4
 # Variants: options that must not change any result (a planner, storage or compiler option: a difference is a bug, or a
 # tie the statement leaves open), and two that change results on purpose (dqs0: which statements rely on double-quoted
@@ -23,7 +24,7 @@ VARIANT_fkeys := -DSQLITE_DEFAULT_FOREIGN_KEYS=1
 sqlite-version: $(SQLITE_API_DEPS)
 	@[ -n "$(V)" ] || { echo "make sqlite-version V=X.Y.Z" >&2; exit 2; }
 	sh backends/sqlite-versions/fetch.sh $(V)
-	$(call sqlite_api_backend,sqlite-$(V),third_party/sqlite-$(V),,)
+	$(call sqlite_api_backend,sqlite-$(V),third_party/sqlite-$(V),-DSQLITE_ENABLE_JSON1,)
 
 sqlite-versions:
 	for v in $(SQLITE_VERSIONS); do [ -f $(B)/backends/sqlite-$$v.so ] || $(MAKE) -s sqlite-version V=$$v || exit 1; done
