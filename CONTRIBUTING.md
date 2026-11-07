@@ -1,5 +1,6 @@
 # Contributing
 
+- **Commit messages and PR titles follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):** `type(scope): description`, with type one of `feat fix perf refactor docs test build ci chore style revert` (e.g. `perf(hs256): …`; `!` before the colon marks a breaking change). `uvx pre-commit install` installs the `commit-msg` check (`tools/check-commit-msg.sh`) with the other hooks.
 - **Setup:** `uvx pre-commit install` once. The hooks run ruff (lint and format), clang-format (`.clang-format`),
   shellcheck, and two local checks:
   - no file of a "fetch"-class corpus app is committed (`tools/check-corpus.py`);
