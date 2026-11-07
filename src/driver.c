@@ -38,7 +38,10 @@
 #include <time.h>
 #include <unistd.h>
 #include "sqlgauntlet.h"
-#ifdef SG_CALLGRIND /* (make callgrind: build/callgrind/sqlgauntlet, the counters are valgrind's) */
+#ifdef SG_CODSPEED /* (make codspeed: build/codspeed/sqlgauntlet, one CodSpeed benchmark per statement and mode) */
+#include "core.h"  /* CodSpeed's instrument-hooks (scripts/fetch-instrument-hooks.sh), with its own callgrind.h */
+#define SG_CALLGRIND 1
+#elif defined(SG_CALLGRIND) /* (make callgrind: build/callgrind/sqlgauntlet, the counters are valgrind's) */
 #include <valgrind/callgrind.h>
 #endif
 #ifdef __linux__
@@ -73,6 +76,10 @@ static int cmpd(const void *a, const void *b) {
 #define NPERF 6 /* (instructions, cycles; with SG_EXTRA kernel cycles, branch misses, page faults, context switches) */
 static int perf_fd[NPERF] = { -1, -1, -1, -1, -1, -1 };
 static void perf_open(int extra) {
+#ifdef SG_CODSPEED
+  (void)extra;
+  return; /* (valgrind has no perf_event_open; CodSpeed's counts are callgrind's) */
+#endif
 #ifdef __linux__
   static const unsigned long long cfg[2] = { PERF_COUNT_HW_INSTRUCTIONS, PERF_COUNT_HW_CPU_CYCLES };
   for (int i = 0; i < 2; i++) {
@@ -118,9 +125,15 @@ static void perf_open(int extra) {
   (void)extra;
 #endif
 }
+#ifdef SG_CALLGRIND
+#ifdef SG_CODSPEED
+static int cg = 1; /* callgrind's collection state: on at start under the CodSpeed runner (no --collect-atstart=no) */
+#else
+static int cg; /* (sqlgauntlet-run --callgrind starts valgrind with --collect-atstart=no) */
+#endif
+#endif
 static void perf_on(int on) {
 #ifdef SG_CALLGRIND
-  static int cg;
   if (on != cg) {
     CALLGRIND_TOGGLE_COLLECT;
     cg = on;
@@ -138,13 +151,66 @@ static long long perf_read(int i) {
   return v;
 }
 static void perf_reset(void) {
-#ifdef SG_CALLGRIND
+#ifdef SG_CODSPEED
+  /* (cs_begin zeroes: CodSpeed's window starts there) */
+#elif defined(SG_CALLGRIND)
   CALLGRIND_ZERO_STATS;
 #elif defined(__linux__)
   for (int i = 0; i < NPERF; i++)
     if (perf_fd[i] >= 0) ioctl(perf_fd[i], PERF_EVENT_IOC_RESET, 0);
 #endif
 }
+
+#ifdef SG_CODSPEED
+/* Under the CodSpeed runner (codspeed run, CodSpeedHQ/action, mode simulation) each statement's timed executions are
+** one benchmark, "<project>::<arm>::<id>[hot|prep]": the measurement window opens before the first timed execution and
+** closes after the last, with collection on only over the timed spans, exactly the callgrind build's counted regions.
+** SG_CODSPEED_ARM names the arm (default: the backend's name); SG_CODSPEED_ONLY="id,id,..." measures only those
+** statements (the others still run, untimed, so caches and plan caches see the whole project). Use a fixed number of
+** executions (SG_MIN_REPS = reps, a large budget): valgrind's clock is ~50x slower, so a budget would cut early. */
+static InstrumentHooks *cs_h;
+static int cs_on;
+static char cs_project[256];
+static int cs_selected(const char *id) {
+  const char *o = getenv("SG_CODSPEED_ONLY");
+  if (!o || !*o) return 1;
+  size_t n = strlen(id);
+  for (const char *p = o; (p = strstr(p, id)); p += n)
+    if ((p == o || p[-1] == ',') && (p[n] == ',' || !p[n])) return 1;
+  return 0;
+}
+static void cs_begin(const char *id) {
+  if (!cs_h) {
+    cs_h = instrument_hooks_init();
+    if (!cs_h || !instrument_hooks_is_instrumented(cs_h)) {
+      fprintf(stderr, "sqlgauntlet: not under the CodSpeed runner (codspeed run -m simulation -- ...)\n");
+      exit(2);
+    }
+    instrument_hooks_set_integration(cs_h, "sqlgauntlet", "1.0.0");
+  }
+  if (!(cs_on = cs_selected(id))) return;
+  if (instrument_hooks_start_benchmark_inline(cs_h)) {
+    fprintf(stderr, "sqlgauntlet: CodSpeed start failed\n");
+    exit(2);
+  }
+  cg = 1;                   /* (starting instrumentation resets callgrind's collection to on, whatever it was before) */
+  CALLGRIND_TOGGLE_COLLECT; /* collect only over the timed spans */
+  cg = 0;
+}
+static void cs_end(const char *project, const char *id, int hot) {
+  if (!cs_on) return;
+  if (!cg) {
+    CALLGRIND_TOGGLE_COLLECT;
+    cg = 1;
+  }
+  instrument_hooks_stop_benchmark_inline(cs_h);
+  char uri[600];
+  const char *arm = getenv("SG_CODSPEED_ARM");
+  snprintf(uri, sizeof uri, "%s::%s::%s[%s]", project, arm && *arm ? arm : B->name, id, hot ? "hot" : "prep");
+  instrument_hooks_set_executed_benchmark(cs_h, (int32_t)getpid(), uri);
+  cs_on = 0;
+}
+#endif
 
 typedef struct Q {
   char *id;
@@ -584,6 +650,14 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
   s_rollback = B->prepare(db, "ROLLBACK", err, sizeof err);
   Q *qs;
   int nq = parse(slurp(argv[3]), &qs);
+#ifdef SG_CODSPEED
+  { /* the project: the .q file's name without its directory and extension */
+    const char *b = strrchr(argv[3], '/');
+    snprintf(cs_project, sizeof cs_project, "%s", b ? b + 1 : argv[3]);
+    char *d = strrchr(cs_project, '.');
+    if (d && !strcmp(d, ".q")) *d = 0;
+  }
+#endif
   for (int i = 0; i < npragma; i++)
     if (B->exec(db, pragma[i], err, sizeof err)) {
       fprintf(stderr, "sqlgauntlet: %s: %s\n", pragma[i], err);
@@ -659,6 +733,9 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         exec1(q, st, &r0);
         first = t_exec;
         perf_reset();
+#ifdef SG_CODSPEED
+        cs_begin(q->id);
+#endif
         for (int k = 0; k < reps && (k < minr || spent < budget) && !r0.err[0]; k++) {
           long long p0[NPERF];
           for (int j = 0; ex && j < NPERF; j++) p0[j] = perf_read(j);
@@ -677,6 +754,9 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         B->finalize(st);
         first = now_ms() - t0;
         perf_reset();
+#ifdef SG_CODSPEED
+        cs_begin(q->id);
+#endif
         for (int k = 0; k < reps && (k < minr || spent < budget) && !r0.err[0]; k++) {
           long long p0[NPERF];
           for (int j = 0; ex && j < NPERF; j++) p0[j] = perf_read(j);
@@ -700,7 +780,9 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         double sum = 0;
         for (int k = 0; k < nt; k++) sum += t[k];
         long long ins = perf_read(0), cyc = perf_read(1);
-#ifdef SG_CALLGRIND
+#ifdef SG_CODSPEED
+        cs_end(cs_project, q->id, hot);
+#elif defined(SG_CALLGRIND)
         {
           char lb[300];
           snprintf(lb, sizeof lb, "%s %s %d", q->id, hot ? "hot" : "prep", nt);

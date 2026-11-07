@@ -6,6 +6,7 @@
 #   make sqlite-api NAME=<n> SRC=<dir with sqlite3.c, sqlite3.h> [EXTRA_CFLAGS=...] [ENV="K=V ..."]
 #                             any library with SQLite's C API, as backend <n> (a fork, a patched build)
 #   make callgrind            the CLI built for valgrind's callgrind (deterministic instruction counts)
+#   make codspeed             the CLI built for CodSpeed's CPU simulation (tools/codspeed.sh: one benchmark per statement)
 #   make test, make lint
 CC ?= cc
 ARCH := $(if $(filter x86_64,$(shell uname -m)),-march=native,-mcpu=native)
@@ -31,6 +32,18 @@ callgrind: $(B)/callgrind/sqlgauntlet
 .PHONY: callgrind
 $(B)/callgrind/sqlgauntlet: src/main.c src/driver.c include/sqlgauntlet.h
 	@mkdir -p $(B)/callgrind; $(CC) -O2 -g -DSG_CALLGRIND -Iinclude src/main.c src/driver.c -o $@ $(LDL) -lm
+
+# make codspeed: the CLI with -DSG_CODSPEED and CodSpeed's instrument-hooks (fetched at a pinned commit by
+# tools/fetch-instrument-hooks.sh): run it under the CodSpeed runner through tools/codspeed.sh
+codspeed: $(B)/codspeed/sqlgauntlet
+.PHONY: codspeed
+IH := $(B)/instrument-hooks
+$(IH)/.rev: tools/fetch-instrument-hooks.sh
+	sh tools/fetch-instrument-hooks.sh $(IH)
+$(B)/codspeed/instrument_hooks.o: $(IH)/.rev
+	@mkdir -p $(B)/codspeed; $(CC) -O2 -g -w -I$(IH)/includes -c $(IH)/dist/core.c -o $@
+$(B)/codspeed/sqlgauntlet: src/main.c src/driver.c include/sqlgauntlet.h $(B)/codspeed/instrument_hooks.o
+	$(CC) -O2 -g -DSG_CODSPEED -Iinclude -I$(IH)/includes src/main.c src/driver.c $(B)/codspeed/instrument_hooks.o -o $@ $(LDL) -lm
 
 # backend_json <name> <dialect> <env "K=V ...">: build/backends/<name>.json, the arm defaults python/sqlgauntlet/run.py reads
 backend_json = python3 -c 'import json, sys; print(json.dumps({"name": sys.argv[1], "dialect": sys.argv[2], \
