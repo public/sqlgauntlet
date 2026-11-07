@@ -40,6 +40,15 @@ TIMEOUT = 1800.0  # (seconds a driver run may take, --timeout: past it, that run
 ARM_VARS = set()  # (every variable some arm sets: none inherits another's)
 
 
+def fresh_copy(src, dst):
+    """src over dst, and dst's -wal, -shm and -journal removed first: a sidecar left by an earlier run (a killed
+    process, an engine that keeps its WAL) would otherwise be read as part of the new copy (a WAL is replayed onto
+    any database file)"""
+    for x in ('-wal', '-shm', '-journal'):
+        Path(f'{dst}{x}').unlink(missing_ok=True)
+    shutil.copyfile(src, dst)
+
+
 def backend_env(name):
     j = BACKENDS / f'{name}.json'
     return json.loads(j.read_text()).get('env', {}) if j.exists() else {}
@@ -165,7 +174,7 @@ def statement_turns(arms, dirs, p, r, k, modes, o, files, extra, tmp):
         qa, da = dirs[arm.dialect]
         if (da / f'{p}.db').exists():
             copies[arm.name] = tmp / f'c-{len(copies)}.db'
-            shutil.copyfile(da / f'{p}.db', copies[arm.name])
+            fresh_copy(da / f'{p}.db', copies[arm.name])
     q0 = dirs['sqlite'][0] / f'{p}.q'
     ids = [l.split()[1] for l in open(q0) if l.startswith('@@Q ')]
     n = len(arms)
@@ -306,7 +315,7 @@ def main(argv=None):
                 for p in projects:
                     if not (da / f'{p}.db').exists():
                         continue
-                    shutil.copyfile(da / f'{p}.db', c)
+                    fresh_copy(da / f'{p}.db', c)
                     arm.run(['check', c, qa / f'{p}.q'], out=f)
             n = sum(1 for l in open(out / f'{arm.name}.check.tsv') if L.split(l)[0] == 'check')
             print(
@@ -346,7 +355,7 @@ def main(argv=None):
                     qa, da = dirs[arm.dialect]
                     if not (da / f'{p}.db').exists():
                         continue
-                    shutil.copyfile(da / f'{p}.db', c)  # (one copy per project, arm and round: writes roll back)
+                    fresh_copy(da / f'{p}.db', c)  # (one copy per project, arm and round: writes roll back)
                     for m in modes:
                         if o.callgrind and arm.kind == 'so':  # (deterministic instructions; times are valgrind's)
                             for f in tmp.glob('cg.*'):
