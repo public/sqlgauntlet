@@ -22,6 +22,8 @@ import os
 import re
 import sys
 
+from . import lines as L
+
 ORDER = ('same', 'types', 'order', 'rows', 'rowcount', 'changes', 'error', 'ref-error', 'both-error', 'unstable', 'missing', 'untranslated')
 
 
@@ -45,10 +47,10 @@ def load_q(d):
 def load(d, arm):
     r = {}
     for l in open(os.path.join(d, f'{arm}.check.tsv'), errors='replace'):
-        p = l.rstrip('\n').split('\t')
-        if p[0] == 'C' and len(p) >= 9:
+        p = L.split(l)
+        if p[0] == 'check' and len(p) >= 9:
             r[p[1]] = dict(st=p[2], rows=p[3], ch=p[4], h=p[5], hs=p[6], alt=p[7], err=p[8])
-        elif p[0] == 'N' and len(p) >= 4 and p[1] in r:
+        elif p[0] == 'norm' and len(p) >= 4 and p[1] in r:
             r[p[1]].update(nh=p[2], nhs=p[3])
     return r
 

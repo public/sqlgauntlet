@@ -3,7 +3,7 @@
   and cycles when the counters ran), with a 95 % percentile-bootstrap interval over rounds (each arm's rounds drawn
   independently, 1,000 draws). A group's ratio is the geometric mean of its statements', bootstrapped the same way.
 - Distributions: the per-statement time ratios' percentiles and how many are over 1.02 or under 0.98.
-- Warm-up vs steady state (with per-execution E lines, sqlgauntlet-run --exec-lines): an execution belongs to the
+- Warm-up vs steady state (with per-execution exec lines, sqlgauntlet-run --exec-lines): an execution belongs to the
   warm-up while the arm is still deciding, i.e. up to the last one whose alternative-path flag differs from the one
   before (an adaptive engine trying its paths before it settles on one); the rest is the steady state. The first,
   untimed execution (prepare and first run, T's first-ms) is reported apart. Steady-state ratios count only
@@ -19,6 +19,8 @@ import os
 import random
 import statistics
 import sys
+
+from . import lines as L
 
 B = 1000
 
@@ -48,11 +50,11 @@ def load(d, arm, mode):
     for f in glob.glob(os.path.join(d, f'{arm}.{mode}.*.tsv')):
         rnd = int(f.rsplit('.', 2)[-2])
         for l in open(f, errors='replace'):
-            p = l.rstrip('\n').split('\t')
-            if p[0] == 'T' and len(p) >= 12:
+            p = L.split(l)
+            if p[0] == 'timing' and len(p) >= 12:
                 sv, n = p[10].split('/')
                 T.setdefault(p[1], {})[rnd] = (float(p[6]), float(p[8]), float(p[9]), p[2], p[3], int(sv), int(n), p[11], float(p[4]))
-            elif p[0] == 'E' and len(p) >= 7:
+            elif p[0] == 'exec' and len(p) >= 7:
                 E.setdefault(p[1], {}).setdefault(rnd, []).append((int(p[3]), float(p[4]), float(p[5]), float(p[6])))
     return T, E
 
