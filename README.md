@@ -166,6 +166,9 @@ The report lists:
   - the largest losses and wins.
 - **Recorded with every result:** host, kernel, CPU, compiler, every backend's build options, version and
   environment, and the corpus and sqlgauntlet commits, in `env.json`.
+- **The slow statements apart** (`--heavy-pass [MS]`): only those tagged `heavy` (left out of every other run) and
+  those whose manifest `stock_ms_indicative` is MS or more (default 150), with `--reps 3 --budget 0` unless given: the
+  pass a full run leaves out or can't afford to repeat.
 - **Rows checked in speed runs too:** a statement whose rows differ from the reference's is left out of the timings
   and listed.
 

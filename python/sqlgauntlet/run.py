@@ -16,6 +16,9 @@ sqlgauntlet-run speed: --rounds rounds; in each, every project's database is cop
   <reference>-aa, the reference again under another name, whose ratios to the reference are the run's noise floor) ->
   <out>/<arm>.<mode>.<round>.tsv (SG_EXEC=1: per-execution exec lines, for the warm-up/steady-state split), then
   summarise's report.
+--heavy-pass MS: only the corpus's slow statements, those tagged heavy and those whose manifest stock_ms_indicative is MS
+  or more (default 150: corpus/tools/time.py's numbers, from the author's machine, a few times under a box's), with few
+  executions (--reps 3 and --budget 0 unless given): the pass a full run leaves out or can't afford to repeat.
 The box, kernel, compiler and every arm's build options and version go to <out>/env.json with the results."""
 
 import json
@@ -182,8 +185,8 @@ def main(argv=None):
     a.add_argument('--driver', default=str(ROOT / 'build' / 'sqlgauntlet'))
     a.add_argument('--rounds', type=int, default=1)
     a.add_argument('--r0', type=int, default=1)
-    a.add_argument('--reps', type=int, default=200)
-    a.add_argument('--budget', type=float, default=60)
+    a.add_argument('--reps', type=int)
+    a.add_argument('--budget', type=float)
     a.add_argument('--modes', default='hot,prep')
     a.add_argument('--exec-lines', action='store_true')
     a.add_argument(
@@ -200,9 +203,14 @@ def main(argv=None):
     a.add_argument('--ids')
     a.add_argument('--wave', default='')
     a.add_argument('--heavy', action='store_true')
+    a.add_argument('--heavy-pass', type=float, nargs='?', const=150.0, metavar='MS', help='only the slow statements, few executions')
     a.add_argument('--keep', action='store_true')
     a.add_argument('--no-report', action='store_true')
     o = a.parse_args(argv)
+    if o.reps is None:
+        o.reps = 3 if o.heavy_pass is not None else 200
+    if o.budget is None:
+        o.budget = 0 if o.heavy_pass is not None else 60
     arms = [Arm(s, o.driver) for s in (o.arm or ['sqlite', 'libsql'])]
     if o.aa:  # (the reference again, second: summarise reads <reference>-aa as the noise floor)
         n0, _, r0 = arms[0].spec.partition('=')
@@ -218,6 +226,10 @@ def main(argv=None):
     for x in (out, d, tmp):
         x.mkdir(parents=True, exist_ok=True)
     ids = {l.split('\t')[0].split()[0] for l in open(o.ids) if l.strip() and not l.startswith('#')} if o.ids else None
+    if o.heavy_pass is not None:  # (the slow statements: tagged heavy, or indicatively MS or more)
+        slow = {i for i, r in P.manifest(o.corpus).items() if 'heavy' in r.get('tags', []) or (r.get('stock_ms_indicative') or 0) >= o.heavy_pass}
+        ids = slow if ids is None else ids & slow
+        o.heavy = True
     if ids is not None:
         shutil.rmtree(q, ignore_errors=True)
     P.prep(o.corpus, q, o.scale, o.projects, ids, o.wave, o.heavy)
@@ -261,6 +273,7 @@ def main(argv=None):
         rounds=o.rounds,
         interleave=o.interleave,
         aa=o.aa,
+        heavy_pass=o.heavy_pass,
         reps=o.reps,
         budget_ms=o.budget,
         min_reps=o.min_reps,
