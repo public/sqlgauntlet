@@ -145,6 +145,12 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 - **Callgrind:** `make callgrind` builds the CLI with `-DSG_CALLGRIND`. `sqlgauntlet-run speed --callgrind` then counts
   instructions under valgrind, collecting only around the timed spans, and dumping once per statement and mode. The
   counts are deterministic on any Linux, so they can measure statements too short to time.
+- **CodSpeed:** `make codspeed` builds the CLI with `-DSG_CODSPEED`: the same counted regions as the callgrind build,
+  but under CodSpeed's runner each statement and mode is one benchmark, `<project>::<arm>::<id>[hot|prep]`, with
+  simulated caches as well as instructions. `tools/codspeed.sh prepare` builds the databases natively, then
+  `codspeed run -m simulation -- tools/codspeed.sh run` runs whole projects with a fixed number of executions and
+  measures the statements in `CODSPEED_IDS`. CI (`.github/workflows/codspeed.yml`) runs stock SQLite and turbo, with
+  turbo's adaptive verdicts pinned, because they time themselves and valgrind's clock is slow.
 
 ### Correctness: normalisation and verdicts (`python/sqlgauntlet/compare.py`)
 

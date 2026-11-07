@@ -1,0 +1,46 @@
+name: codspeed
+# Corpus statements as CodSpeed CPU-simulation benchmarks (tools/codspeed.sh): stock SQLite and turbo
+# (public/cursed-sqlite-turbo at the pin below, adapt off so the counts measure its compiled plan), whole projects,
+# hot and prep. Deterministic instruction counts and simulated caches; reports on pull requests compare with main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write # OIDC upload to CodSpeed, no token secret
+concurrency:
+  group: codspeed-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  TURBO_COMMIT: 6af6162f876272570c6b50541de041eb9f5bf2a6
+  # a fixed ISA: -march=native would change the instruction counts with the runner's CPU
+  CFLAGS: -O2 -march=x86-64-v3
+  # turbo served (adapt off), and turbo parking every plan it samples (the per-prepare overhead on parked statements)
+  CODSPEED_ARMS: sqlite turbo:QC_NOADAPT=1 turbo-park=turbo:QC_ADAPT_MARGIN=1e-9:CODSPEED_REPS=30
+jobs:
+  benchmarks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: third_party/sqlite
+          key: sqlite-${{ hashFiles('backends/sqlite/fetch.sh') }}
+      - run: make CFLAGS="$CFLAGS" all sqlite
+      - name: turbo at the pin, as the backend "turbo" (as its scripts/gauntlet.sh builds it)
+        run: |
+          git clone -q https://github.com/public/cursed-sqlite-turbo build/turbo
+          git -C build/turbo checkout -q "$TURBO_COMMIT"
+          make -s -C build/turbo all
+          T=build/turbo-src && mkdir -p $T
+          cp build/turbo/build/gen/sqlite3.c $T/ && printf '\n#include "qc.c"\n' >> $T/sqlite3.c
+          cp build/turbo/build/gen/sqlite3.h build/turbo/build/gen/qc_dec.h $T/
+          make CFLAGS="$CFLAGS" sqlite-api NAME=turbo SRC=$T ENV="QC_SERVE=1" EXTRA_CFLAGS="-I$PWD/build/turbo/qc"
+      - run: tools/codspeed.sh prepare
+      - uses: CodSpeedHQ/action@v5
+        with:
+          mode: simulation
+          run: tools/codspeed.sh run
