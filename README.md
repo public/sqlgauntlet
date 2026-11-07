@@ -150,6 +150,10 @@ The report lists:
 
 - **Arms in the same run, interleaved.** Builds measured one after another drift with run order. In each round, every
   app's database is copied once per arm, and the arms run it in an order rotated by round and app.
+- **Per-statement turns** (`--interleave statement`): the arms take turns statement by statement, each statement in its
+  own process, in an order rotated by round, project and statement, so drift within a project's run falls on every arm.
+- **An A/A control** (`--aa`): the reference again as `<reference>-aa`. Its ratios to the reference are the run's noise;
+  their 2.5th–97.5th percentiles make a band, and summarise counts every other arm's statements outside it.
 - **Warm-up apart from steady state.** With exec lines, an execution is warm-up while the arm is still changing paths.
   The rest is steady state. Steady-state ratios need 3 or more steady executions on both sides, because fewer
   measures warm-up. The first execution (prepare plus first run) is reported separately.

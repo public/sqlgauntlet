@@ -11,6 +11,9 @@ sqlgauntlet-run check: every statement 8 times per arm (the driver's check mode)
   project -> <out>/<arm>.check.tsv, then compare's report.
 sqlgauntlet-run speed: --rounds rounds; in each, every project's database is copied once per arm and the arms run it in
   an order rotated by round and project (so no arm is always first or always last on a warm cache), hot then prep ->
+  (--interleave statement: the arms take turns statement by statement instead, each in its own process, in an order
+  rotated by round, project and statement, so drift within a project's run falls on every arm alike; --aa adds
+  <reference>-aa, the reference again under another name, whose ratios to the reference are the run's noise floor) ->
   <out>/<arm>.<mode>.<round>.tsv (SG_EXEC=1: per-execution exec lines, for the warm-up/steady-state split), then
   summarise's report.
 The box, kernel, compiler and every arm's build options and version go to <out>/env.json with the results."""
@@ -40,6 +43,7 @@ def backend_env(name):
 
 class Arm:
     def __init__(self, spec, driver):
+        self.spec = spec
         name, _, rest = spec.partition('=')
         parts = (rest or name).split(':')
         if parts[0] in ('so', 'exe'):
@@ -144,6 +148,27 @@ def build_db(arm, db, bs, lt, ps, tmp, blocks=False):
     return ok
 
 
+def statement_turns(arms, dirs, p, r, k, modes, o, files, extra, tmp):
+    """one project's round with the arms taking turns statement by statement: each arm its own copy of the database
+    (writes roll back), then per statement every arm in an order rotated by round, project and statement"""
+    copies = {}
+    for arm in arms:
+        qa, da = dirs[arm.dialect]
+        if (da / f'{p}.db').exists():
+            copies[arm.name] = tmp / f'c-{len(copies)}.db'
+            shutil.copyfile(da / f'{p}.db', copies[arm.name])
+    q0 = dirs['sqlite'][0] / f'{p}.q'
+    ids = [l.split()[1] for l in open(q0) if l.startswith('@@Q ')]
+    n = len(arms)
+    for j, sid in enumerate(ids):
+        for arm in [arms[(x + r + k + j) % n] for x in range(n)]:
+            if arm.name not in copies:
+                continue
+            qa = dirs[arm.dialect][0]
+            for m in modes:
+                arm.run([m, copies[arm.name], qa / f'{p}.q', o.reps, o.budget, sid], out=files[arm.name, m, r], extra=extra)
+
+
 def main(argv=None):
     import argparse
 
@@ -168,6 +193,8 @@ def main(argv=None):
     )
     a.add_argument('--split', action='store_true', help='speed: exec lines with the time in step, column reads and reset (SG_SPLIT; implies --exec-lines)')
     a.add_argument('--min-reps', type=int, help='speed: executions each statement gets whatever the budget (SG_MIN_REPS; the driver\'s default is 3)')
+    a.add_argument('--interleave', choices=('project', 'statement'), default='project', help='speed: the arms take turns by project (default) or statement')
+    a.add_argument('--aa', action='store_true', help='speed: an A/A control, the reference again as <reference>-aa, for the noise floor')
     a.add_argument('--callgrind', action='store_true', help='speed: instructions from valgrind (make callgrind; so arms)')
     a.add_argument('--scale', default='1')
     a.add_argument('--ids')
@@ -177,6 +204,11 @@ def main(argv=None):
     a.add_argument('--no-report', action='store_true')
     o = a.parse_args(argv)
     arms = [Arm(s, o.driver) for s in (o.arm or ['sqlite', 'libsql'])]
+    if o.aa:  # (the reference again, second: summarise reads <reference>-aa as the noise floor)
+        n0, _, r0 = arms[0].spec.partition('=')
+        arms.insert(1, Arm(f'{n0}-aa={r0 or n0}', o.driver))
+    if o.interleave == 'statement' and o.callgrind:
+        sys.exit('sqlgauntlet-run: --interleave statement times natively; callgrind runs one process per project')
     if len({x.name for x in arms}) != len(arms):
         sys.exit('sqlgauntlet-run: arm names must differ')
     out = Path(o.out)
@@ -227,6 +259,8 @@ def main(argv=None):
         mode=o.mode,
         build_with=bw.name,
         rounds=o.rounds,
+        interleave=o.interleave,
+        aa=o.aa,
         reps=o.reps,
         budget_ms=o.budget,
         min_reps=o.min_reps,
@@ -282,6 +316,9 @@ def main(argv=None):
                     files[arm.name, m, r].flush()
             for k, p in enumerate(projects):
                 n = len(arms)
+                if o.interleave == 'statement':
+                    statement_turns(arms, dirs, p, r, k, modes, o, files, extra, tmp)
+                    continue
                 order = [arms[(j + r + k) % n] for j in range(n)]
                 for arm in order:
                     qa, da = dirs[arm.dialect]
