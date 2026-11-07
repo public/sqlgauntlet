@@ -709,8 +709,9 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
 #endif
         qsort(t, (size_t)nt, sizeof *t, cmpd);
         clean(r0.err);
-        printf("timing\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first, nt ? sum / nt : first,
-               nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, alt, nt, r0.err[0] ? r0.err : "-");
+        printf("timing\t%s\t%ld\t%016llx\t%.4f\t%.4f\t%.5f\t%d\t%.1f\t%.1f\t%d/%d\t%s\n", q->id, r0.rows, r0.h, first, nt ? t[nt / 2] : first,
+               nt ? sum / nt : first, nt, ins >= 0 && nt ? (double)ins / nt : -1.0, cyc >= 0 && nt ? (double)cyc / nt : -1.0, alt, nt,
+               r0.err[0] ? r0.err : "-");
         for (int k = 0; ex && k < nt; k++) {
           printf("exec\t%s\t%d\t%d\t%.5f\t%.0f\t%.0f\t%.5f", q->id, k + 1, ex[k].alt, ex[k].ms, ex[k].ins, ex[k].cyc, ex[k].eng);
           if (sextra || ssplit)
