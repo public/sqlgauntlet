@@ -1,6 +1,7 @@
-# pre-commit install  (or: uvx pre-commit run --all-files)
+# pre-commit install  (installs the pre-commit and commit-msg hooks; or: uvx pre-commit run --all-files)
 # (the corpus upstream's own files keep their bytes: docs/PROVENANCE.md)
 exclude: ^(workloads/doomql/mk(port|peter)\.py$|workloads/sqldoom/(mkport\.py|mkpath\.py|pg/)|corpus/tools/|corpus/(INDEX|STATS|SURVEY)\.md$|corpus/scores\.json$)
+default_install_hook_types: [pre-commit, commit-msg]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -46,3 +47,8 @@ repos:
         language: system
         types: [text]
         exclude: ^(corpus/projects/|corpus/manifest[^/]*\.jsonl$|\.pre-commit-config\.yaml$)
+      - id: conventional-commit
+        name: Conventional Commits (tools/check-commit-msg.sh)
+        entry: sh tools/check-commit-msg.sh
+        language: system
+        stages: [commit-msg]
