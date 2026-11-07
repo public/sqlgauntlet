@@ -8,6 +8,10 @@
   before (an adaptive engine trying its paths before it settles on one); the rest is the steady state. The first,
   untimed execution (prepare and first run, T's first-ms) is reported apart. Steady-state ratios count only
   steady-state executions, and only for statements with at least 3 of them on both sides: fewer measures warm-up.
+- Where the time goes (exec lines with SG_EXTRA / SG_SPLIT, sqlgauntlet-run --extra-counters / --split): per side, over
+  steady-state executions, the median statement's kernel share of cycles, its page faults and context switches per
+  execution, and its time split into step calls, column reads and the reset after it; then the statements whose
+  kernel share differs most between the arms (time a side spends in the kernel is outside the user-mode counters).
 - Left out, and listed: statements whose rows differ from the reference's (unless they read the clock), that error,
   or that time at 0.
 Markdown on stdout."""
@@ -55,7 +59,8 @@ def load(d, arm, mode):
                 sv, n = p[10].split('/')
                 T.setdefault(p[1], {})[rnd] = (float(p[6]), float(p[8]), float(p[9]), p[2], p[3], int(sv), int(n), p[11], float(p[4]))
             elif p[0] == 'exec' and len(p) >= 7:
-                E.setdefault(p[1], {}).setdefault(rnd, []).append((int(p[3]), float(p[4]), float(p[5]), float(p[6])))
+                x = tuple(float(v) for v in p[8:15]) if len(p) >= 15 else ()  # (kernel-cycles ... reset-ms)
+                E.setdefault(p[1], {}).setdefault(rnd, []).append((int(p[3]), float(p[4]), float(p[5]), float(p[6])) + x)
     return T, E
 
 
@@ -66,6 +71,59 @@ def split(ex):
         if ex[k][0] != ex[k - 1][0]:
             last = k
     return ex[:last], ex[last:]
+
+
+def where(items, SE, AE, rs, ra, ref, arm):
+    """the 'where the time goes' table and the statements whose kernel share differs most (exec lines' extra columns)"""
+
+    def facts(X, rr, i):
+        ex = [e for r in rr for e in split(X.get(i, {}).get(r, []))[1] if len(e) >= 11]
+        if len(ex) < 3:
+            return None
+        f = {}
+        if all(e[4] >= 0 and e[3] >= 0 for e in ex):
+            f['kernel'] = statistics.fmean(e[4] / max(1.0, e[3] + e[4]) for e in ex)
+        for k, j in (('faults', 6), ('switches', 7)):
+            if all(e[j] >= 0 for e in ex):
+                f[k] = statistics.fmean(e[j] for e in ex)
+        if all(e[8] >= 0 for e in ex):
+            ms = statistics.fmean(e[1] for e in ex) or 1e-9
+            for k, j in (('step', 8), ('column', 9), ('reset', 10)):
+                f[k] = statistics.fmean(e[j] for e in ex) / ms
+        return f
+
+    fs = {i: facts(SE, rs, i) for i in items}
+    fa = {i: facts(AE, ra, i) for i in items}
+    both = [i for i in items if fs[i] and fa[i]]
+    keys = [k for k in ('kernel', 'faults', 'switches', 'step', 'column', 'reset') if all(k in fs[i] and k in fa[i] for i in both)]
+    if not both or not keys:
+        return
+    label = {
+        'kernel': 'kernel share of cycles',
+        'faults': 'page faults / execution',
+        'switches': 'context switches / execution',
+        'step': 'step calls (share of ms)',
+        'column': 'column reads (share of ms)',
+        'reset': 'reset (vs ms, outside it)',
+    }
+    print(f'\nWhere the time goes ({len(both)} statements, steady state; medians over statements):\n')
+    print(f'| | {ref} | {arm} |\n|---|---:|---:|')
+    for k in keys:
+        a, b = statistics.median(fs[i][k] for i in both), statistics.median(fa[i][k] for i in both)
+        fmt = '{:.1%}' if k in ('kernel', 'step', 'column', 'reset') else '{:.2f}'
+        print(f'| {label[k]} | {fmt.format(a)} | {fmt.format(b)} |')
+    if 'kernel' in keys:
+        top = sorted(both, key=lambda i: -abs(fa[i]['kernel'] - fs[i]['kernel']))[:10]
+        top = [i for i in top if abs(fa[i]['kernel'] - fs[i]['kernel']) >= 0.1]
+        if top:
+            print(f'\nKernel share differing by 10 points or more ({ref} / {arm}):\n')
+            print('| statement | kernel share | page faults | context switches |\n|---|---:|---:|---:|')
+
+            def pair(i, k, fmt):
+                return ' / '.join(fmt.format(f[k]) if k in f else '-' for f in (fs[i], fa[i]))
+
+            for i in top:
+                print(f"| {i} | {pair(i, 'kernel', '{:.0%}')} | {pair(i, 'faults', '{:.1f}')} | {pair(i, 'switches', '{:.2f}')} |")
 
 
 def main(argv=None):
@@ -191,6 +249,7 @@ def main(argv=None):
                         f'Warm-up (executions before the arm\'s last change of path): {len(wu)} statements; median '
                         f'{statistics.median(x[1] for x in wu):.0f} executions, {sum(x[2] for x in wu):.1f} ms in all per round'
                     )
+                where(items, SE, AE, rs, ra, ref, arm)
             fm = gm([statistics.fmean(A[i][r][8] for r in ra) / statistics.fmean(S[i][r][8] for r in rs) for i in items if all(S[i][r][8] > 0 for r in rs)])
             print(f'\nFirst execution (prepare + first run, untimed in the above): geomean {fm:.3f}\n')
             print('By tag (20 or more statements):\n')

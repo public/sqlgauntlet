@@ -95,6 +95,13 @@ are `exec_begin`, `exec_stats` (facts the driver can't see), `counter_names` and
 - **Counters:** on Linux, user-mode instructions and cycles come from `perf_event_open` over the timed spans
   (`perf_event_paranoid ≤ 2`); elsewhere they are -1.
 - **Exec lines:** `SG_EXEC=1` prints one per execution: `exec stmt run alt wall_ms instructions cycles engine_ms`.
+- **Where the time goes:** `SG_EXTRA=1` and `SG_SPLIT=1` (`sqlgauntlet-run speed --extra-counters`, `--split`) add
+  seven columns to each exec line, -1 where off or unavailable: `kernel_cycles branch_misses page_faults
+  context_switches step_ms column_ms reset_ms`. Kernel-mode cycles need `perf_event_paranoid ≤ 1` (or root); the
+  split times the backend's step calls, its column reads and the reset after the execution (outside `wall_ms`).
+  summarise then reports each side's kernel share, faults, switches and split, and the statements whose kernel share
+  differs most: wall time the user-mode counters can't see. `--min-reps N` gives every statement N executions whatever
+  the budget, so an adaptive engine reaches its steady state.
 - **Readable files:** sqlgauntlet-run starts every .tsv with a `#` line per record type naming its columns, e.g.
   `# exec stmt run alt wall_ms instructions cycles engine_ms`. The record tags were single letters before
   (`C N T E R I`); `python/sqlgauntlet/lines.py` reads both, so older results still parse.
