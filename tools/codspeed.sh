@@ -12,7 +12,8 @@
 #   CODSPEED_PROJECTS  corpus projects (default: the ones CODSPEED_IDS come from)
 #   CODSPEED_IDS       statements to measure, space-separated (default: the list below)
 #   CODSPEED_REPS      timed executions per statement and mode (default 5; executions are fixed, the budget unlimited);
-#                      an arm can carry its own, e.g. "turbo-park=turbo:QC_ADAPT_MARGIN=1e-9:CODSPEED_REPS=30"
+#                      an arm can carry its own CODSPEED_REPS, CODSPEED_PROJECTS and CODSPEED_IDS (comma lists), e.g.
+#                      "turbo-park=turbo:QC_ADAPT_MARGIN=1e-9:CODSPEED_REPS=30:CODSPEED_PROJECTS=trilium,grafana"
 #   CODSPEED_OUT       work directory (default build/codspeed-run)
 # Adaptive engines time themselves, and valgrind's clock is ~50x slow: pin their decisions in the arm so the counts
 # measure one known path. turbo: QC_NOADAPT=1 serves every compiled plan; QC_ADAPT_MARGIN=1e-9 parks every plan adapt
@@ -63,14 +64,20 @@ run)
   ONLY=$(echo "$IDS" | tr -s ' \t\n' ',' | sed 's/^,//; s/,$//')
   PROJS=$(cat "$OUT/codspeed/projects")
   while read -r label so env; do
-    reps=$REPS # (an arm's own CODSPEED_REPS=N wins: adapt needs ~10 executions before its verdict)
-    for kv in $env; do case $kv in CODSPEED_REPS=*) reps=${kv#CODSPEED_REPS=} ;; esac; done
-    for p in $PROJS; do
+    reps=$REPS projs=$PROJS only=$ONLY # (an arm's own CODSPEED_REPS / CODSPEED_PROJECTS / CODSPEED_IDS win, commas)
+    for kv in $env; do
+      case $kv in
+        CODSPEED_REPS=*) reps=${kv#CODSPEED_REPS=} ;;
+        CODSPEED_PROJECTS=*) projs=$(echo "${kv#CODSPEED_PROJECTS=}" | tr ',' ' ') ;;
+        CODSPEED_IDS=*) only=${kv#CODSPEED_IDS=} ;;
+      esac
+    done
+    for p in $projs; do
       [ -f "$OUT/db/$p.db" ] || continue
       for m in hot prep; do
         cp "$OUT/db/$p.db" "$OUT/codspeed/c.db" # (a fresh copy per arm and mode: writes roll back)
         # shellcheck disable=SC2086 # (env: K=V words)
-        env $env TZ=UTC SG_CODSPEED_ARM="$label" SG_CODSPEED_ONLY="$ONLY" SG_MIN_REPS="$reps" \
+        env $env TZ=UTC SG_CODSPEED_ARM="$label" SG_CODSPEED_ONLY="$only" SG_MIN_REPS="$reps" \
           "$R/build/codspeed/sqlgauntlet" --backend "$so" "$m" "$OUT/codspeed/c.db" "$OUT/q/$p.q" "$reps" 1e12 >/dev/null
       done
     done
