@@ -36,6 +36,7 @@ from . import prep as P
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKENDS = ROOT / 'build' / 'backends'
+TIMEOUT = 1800.0  # (seconds a driver run may take, --timeout: past it, that run's statements are missing)
 ARM_VARS = set()  # (every variable some arm sets: none inherits another's)
 
 
@@ -70,9 +71,14 @@ class Arm:
         e.update(extra or {})
         return e
 
-    def run(self, args, out=None, extra=None, timeout=1800, wrap=(), driver=None):
+    def run(self, args, out=None, extra=None, timeout=None, wrap=(), driver=None):
         cmd = list(wrap) + ([driver] + self.cmd[1:] if driver and self.kind == 'so' else self.cmd) + [str(a) for a in args]
-        r = subprocess.run(cmd, stdout=out or subprocess.PIPE, stderr=subprocess.PIPE, env=self.environ(extra), timeout=timeout, text=True)
+        timeout = timeout or TIMEOUT
+        try:
+            r = subprocess.run(cmd, stdout=out or subprocess.PIPE, stderr=subprocess.PIPE, env=self.environ(extra), timeout=timeout, text=True)
+        except subprocess.TimeoutExpired:  # (one project too slow: its statements show as missing, the arm goes on)
+            print(f'sqlgauntlet-run: {self.name} {args[0]} {Path(str(args[-1])).name}: timed out after {timeout:.0f} s', file=sys.stderr)
+            return subprocess.CompletedProcess(cmd, 124, '', 'timed out')
         if r.returncode:
             print(f'sqlgauntlet-run: {self.name} {args[0]} {Path(str(args[-1])).name}: exit {r.returncode}: {r.stderr.strip()[-300:]}', file=sys.stderr)
         return r
@@ -134,7 +140,7 @@ def build_db(arm, db, bs, lt, ps, tmp, blocks=False):
     db.unlink(missing_ok=True)
     part = db.with_suffix('.db.part')
     part.unlink(missing_ok=True)
-    ok = arm.run(['build', part, bs]).returncode == 0
+    ok = arm.run(['build', part, bs], timeout=7200).returncode == 0
     if ok and lt.exists():  # (a workload's or an export's data files, then indexes, views and ANALYZE)
         for line in lt.read_text().splitlines():
             t, f, fmt = line.split('\t')
@@ -204,9 +210,12 @@ def main(argv=None):
     a.add_argument('--wave', default='')
     a.add_argument('--heavy', action='store_true')
     a.add_argument('--heavy-pass', type=float, nargs='?', const=150.0, metavar='MS', help='only the slow statements, few executions')
+    a.add_argument('--timeout', type=float, help='seconds one driver run (an arm on a project) may take (default 1800); past it, its statements are missing')
     a.add_argument('--keep', action='store_true')
     a.add_argument('--no-report', action='store_true')
-    o = a.parse_args(argv)
+    o = a.parse_intermixed_args(argv)  # (the projects may come after the options: run check --arm a --out X <project>)
+    global TIMEOUT
+    TIMEOUT = o.timeout or TIMEOUT
     if o.reps is None:
         o.reps = 3 if o.heavy_pass is not None else 200
     if o.budget is None:
