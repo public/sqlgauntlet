@@ -1,0 +1,5 @@
+# what	sha256	url
+node-v26.13.0-linux-x64	d28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997	https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-x64.tar.xz
+bun-v1.4.4-linux-x64	bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c	https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
+sql.js-1.15.2	74fbdd373ad7eb2bbe74c7807581c1c39e424ee53ed95042a02208cbc96d72fd	https://registry.npmjs.org/sql.js/-/sql.js-1.15.2.tgz
+sqlite-wasm-3.54.1-build1	06aaad2dd0b58a46631000a31a4469afff4abeffbc383f37372b6590396d9bbd	https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.54.1-build1.tgz
