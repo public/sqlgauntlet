@@ -12,7 +12,8 @@ warm-up measured separately from steady state.
 | `turso` | Turso 0.8.3 (a Rust rewrite of SQLite's engine), over its C ABI (`sdk-kit`) | `sh backends/turso/fetch.sh build` (Rust), then `make turso` |
 | `postgres` | PostgreSQL, a client over libpq; statements translated by sqlglot, data exported from the SQLite build | `make postgres PG_URL=…` (libpq, `pip install sqlglot`); `backends/postgres/server.sh` starts a throwaway server in Docker |
 | any SQLite-API library | a fork or a patched build: `make sqlite-api NAME=<n> SRC=<dir>` | built from your tree |
-| DuckDB, MySQL | other dialects, through the same dialect layer | not yet |
+| `duckdb` | DuckDB 2.0.0, in-process over its C API; statements translated by sqlglot, data exported from the SQLite build (loaded with DuckDB's own `COPY`); one thread, 512 MB memory, at most 2 GB spilled (`SG_DUCKDB_THREADS`, `SG_DUCKDB_MEMORY`, `SG_DUCKDB_TEMP_MAX`) | `make duckdb` (fetches the prebuilt library), `pip install sqlglot` |
+| MySQL | another dialect, through the same dialect layer | not yet |
 
 ## Quick start
 

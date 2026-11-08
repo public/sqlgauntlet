@@ -2,6 +2,7 @@ build/
 third_party/sqlite/
 third_party/libsql/
 third_party/turso/
+third_party/duckdb/
 corpus/fetched/
 __pycache__/
 *.egg-info/
