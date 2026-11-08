@@ -196,6 +196,7 @@ def main(argv=None):
     )
     a.add_argument('--split', action='store_true', help='speed: exec lines with the time in step, column reads and reset (SG_SPLIT; implies --exec-lines)')
     a.add_argument('--min-reps', type=int, help='speed: executions each statement gets whatever the budget (SG_MIN_REPS; the driver\'s default is 3)')
+    a.add_argument('--warm', type=int, metavar='N', help='speed: N uncounted executions after the first, before the counted ones (SG_WARM: past an engine\'s warm-up, e.g. turbo\'s feedback runs)')
     a.add_argument('--interleave', choices=('project', 'statement'), default='project', help='speed: the arms take turns by project (default) or statement')
     a.add_argument('--aa', action='store_true', help='speed: an A/A control, the reference again as <reference>-aa, for the noise floor')
     a.add_argument('--callgrind', action='store_true', help='speed: instructions from valgrind (make callgrind; so arms)')
@@ -319,6 +320,8 @@ def main(argv=None):
             extra['SG_SPLIT'] = '1'
         if o.min_reps:
             extra['SG_MIN_REPS'] = str(o.min_reps)
+        if o.warm:
+            extra['SG_WARM'] = str(o.warm)
         files = {}
         for r in range(o.r0, o.r0 + o.rounds):
             t0 = time.time()
