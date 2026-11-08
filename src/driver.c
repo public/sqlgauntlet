@@ -9,7 +9,8 @@
 **   hot|prep <db> <project.q> [reps] [budget-ms] [only-id]   timing:
 **        timing stmt rows hash first_ms median_ms mean_ms runs instructions cycles alt/runs error
 **     hot: prepared once, then 1 + reps executions (reset between); prep: every execution prepares, binds, steps and
-**     finalizes. reps stop early once budget-ms is spent (at least SG_MIN_REPS, default 3). instr, cycles: user mode,
+**     finalizes. SG_WARM=N: N more uncounted executions after the first (an engine past its warm-up). reps stop early
+**     once budget-ms is spent (at least SG_MIN_REPS, default 3). instr, cycles: user mode,
 **     per execution (Linux perf_event_open; -1 elsewhere or when the kernel refuses).
 **     SG_EXEC=1: after each timing line, one exec line per counted execution, in order (run from 1), for warm-up vs
 **     steady state:
@@ -598,6 +599,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
   double budget = argc > 5 && !check && !rows ? atof(argv[5]) : 100;
   const char *only = check ? (argc > 4 ? argv[4] : 0) : rows ? argv[4] : (argc > 6 ? argv[6] : 0);
   int minr = getenv("SG_MIN_REPS") ? atoi(getenv("SG_MIN_REPS")) : 3;
+  int warm = getenv("SG_WARM") ? atoi(getenv("SG_WARM")) : 0; /* uncounted runs after the first: past an engine's warm-up (turbo's feedback runs) */
   if (!check && !rows) perf_open(sextra);
   double *t = malloc(sizeof *t * (size_t)(reps + 1));
   struct E *ex = sexec ? malloc(sizeof *ex * (size_t)(reps + 1)) : 0;
@@ -658,6 +660,7 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         if (prep(q, &st, &r0)) goto bad;
         exec1(q, st, &r0);
         first = t_exec;
+        for (int w = 0; w < warm && !r0.err[0]; w++) exec1(q, st, &r);
         perf_reset();
         for (int k = 0; k < reps && (k < minr || spent < budget) && !r0.err[0]; k++) {
           long long p0[NPERF];
@@ -676,6 +679,11 @@ int sg_main(const sg_backend *b, int argc, char **argv) {
         exec1(q, st, &r0);
         B->finalize(st);
         first = now_ms() - t0;
+        for (int w = 0; w < warm && !r0.err[0]; w++) {
+          if (prep(q, &st, &r)) break;
+          exec1(q, st, &r);
+          B->finalize(st);
+        }
         perf_reset();
         for (int k = 0; k < reps && (k < minr || spent < budget) && !r0.err[0]; k++) {
           long long p0[NPERF];
