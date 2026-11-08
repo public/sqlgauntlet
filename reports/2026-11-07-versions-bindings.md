@@ -126,7 +126,7 @@ box, with one thread, 512 MB of memory and 2 GB of spill.
 - **Errors are nearly all translation gaps, not DuckDB faults:**
   - FTS `MATCH` (31);
   - SQLite's date functions with modifiers: `date(x, '+1 day')`, `datetime()`, `julianday()` (42);
-  - SQLite's bare columns in `GROUP BY` (65 or more);
+  - SQLite's bare columns in `GROUP BY` (49 in the most common messages alone);
   - SQLite-only tables (`page_stat`);
   - views that failed to translate, and so are missing (`v_schedules`, `devicesview`);
   - `substr` on integers;
