@@ -41,11 +41,12 @@ ARM_VARS = set()  # (every variable some arm sets: none inherits another's)
 
 
 def fresh_copy(src, dst):
-    """src over dst, and dst's -wal, -shm and -journal removed first: a sidecar left by an earlier run (a killed
+    """src over dst, and dst's -wal, -shm, -journal (SQLite) and .wal, .tmp/ (DuckDB) removed first: a sidecar left by an earlier run (a killed
     process, an engine that keeps its WAL) would otherwise be read as part of the new copy (a WAL is replayed onto
     any database file)"""
-    for x in ('-wal', '-shm', '-journal'):
+    for x in ('-wal', '-shm', '-journal', '.wal'):  # (.wal: DuckDB's)
         Path(f'{dst}{x}').unlink(missing_ok=True)
+    shutil.rmtree(f'{dst}.tmp', ignore_errors=True)  # (DuckDB's spill directory)
     shutil.copyfile(src, dst)
 
 
