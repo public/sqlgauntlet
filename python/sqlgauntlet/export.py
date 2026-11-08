@@ -105,8 +105,10 @@ def export(db, out, p, dialect, log=None):
         with open(f, 'w') as fh:
             for r in con.execute(f'SELECT {", ".join(qi(c[1]) for c in cols)} FROM {qi(n)}'):
                 fh.write(','.join(field(v, dialect) for v in r) + '\n')
-        if dialect == 'duckdb':  # (its own CSV reader: far faster than row-by-row inserts; a quoted \\N stays text, as in load)
-            ddl.append(f"COPY {qi(n)} FROM '{f.resolve()}' (FORMAT csv, HEADER false, NULLSTR '\\N', ALLOW_QUOTED_NULLS false, QUOTE '\"', ESCAPE '\"');")
+        if dialect == 'duckdb':  # (its own CSV reader: far faster than row-by-row inserts; a quoted \\N stays text, as in load;
+            #  the dialect given, never sniffed, and an empty table not read at all: the sniffer refuses an empty file)
+            if f.stat().st_size:
+                ddl.append(f"COPY {qi(n)} FROM '{f.resolve()}' (FORMAT csv, HEADER false, DELIM ',', NULLSTR '\\N', ALLOW_QUOTED_NULLS false, QUOTE '\"', ESCAPE '\"');")
         else:
             loads.append(f'{qi(n)}\t{f.resolve()}\tcsvn')
         for _, ix, _, origin, _ in con.execute(f'PRAGMA index_list({qi(n)})').fetchall():
