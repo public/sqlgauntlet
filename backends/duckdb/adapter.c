@@ -47,6 +47,8 @@ static sg_conn *d_open(const char *path, char *err, size_t n) {
   duckdb_set_config(cfg, "memory_limit", mem && *mem ? mem : "512MB");
   const char *tmp = getenv("SG_DUCKDB_TEMP_MAX"); /* (a query that would spill more fails instead of filling the disk) */
   duckdb_set_config(cfg, "max_temp_directory_size", tmp && *tmp ? tmp : "2GB");
+  duckdb_set_config(cfg, "integer_division", "true"); /* (integer / integer is integer division, as in SQLite: sqlglot
+                                                         writes SQLite's / unchanged, and DuckDB's / is otherwise real) */
   int bad = duckdb_open_ext(path, &c->db, cfg, &e) != DuckDBSuccess;
   duckdb_destroy_config(&cfg);
   if (bad) {

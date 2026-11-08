@@ -39,11 +39,11 @@ def number_params(sql):
     return PARAM.sub(sub, sql), names
 
 
-def transpile(sg, sql, dialect):
+def transpile(sg, sql, dialect, like_ci=True):
     """sqlglot's translation: every identifier lowercased and quoted, quoted ones too (SQLite's names are case-insensitive
     even quoted; export.py creates them the same way, so reserved words such as user work); SQLite's schema prefix main.
     dropped; ON CONFLICT's target without the NULLS FIRST that sqlglot adds to every column list it reads as an
-    ordering"""
+    ordering; LIKE as ILIKE when the app's LIKE ignores case (SQLite's default)"""
     out = []
     for e in sg.parse(sql, read='sqlite'):
         if e is None:
@@ -53,6 +53,9 @@ def transpile(sg, sql, dialect):
         for t in e.find_all(sg.exp.Table):
             if t.args.get('db') is not None and t.db.lower() == 'main':
                 t.set('db', None)
+        if like_ci:  # (SQLite's LIKE ignores ASCII case unless PRAGMA case_sensitive_like; the others' LIKE doesn't)
+            for k in list(e.find_all(sg.exp.Like)):
+                k.replace(sg.exp.ILike(this=k.this, expression=k.expression, escape=k.args.get('escape')))
         out.append(e.sql(dialect=dialect, unsupported_level=sg.ErrorLevel.RAISE, identify=True))
     fix = lambda m: re.sub(r'\s+NULLS\s+(FIRST|LAST)', '', m.group(0))
     return [re.sub(r'ON CONFLICT\s*\([^()]*\)', fix, x) for x in out]
@@ -78,17 +81,18 @@ class Translator:
         except ImportError:
             self.sg = None
 
-    def _glot(self, sql):
+    def _glot(self, sql, like_ci=True):
         if not self.sg:
             return None, 'no translator (pip install sqlglot)'
         try:
-            out = transpile(self.sg, sql, self.dialect)
+            out = transpile(self.sg, sql, self.dialect, like_ci)
         except Exception as e:
             return None, f'sqlglot: {str(e).splitlines()[0][:160]}'
         return ';\n'.join(out) + ';', None
 
-    def statement(self, i, sql, params=()):
-        """(text, params renamed for the dialect, None) or (None, None, why). params: [(SQLite name, literal)]"""
+    def statement(self, i, sql, params=(), like_ci=True):
+        """(text, params renamed for the dialect, None) or (None, None, why). params: [(SQLite name, literal)];
+        like_ci: the app's LIKE ignores case (no PRAGMA case_sensitive_like)"""
         o = self.over.get(i)
         if o and 'untranslatable' in o:
             return None, None, 'override: ' + o['untranslatable']
@@ -96,7 +100,7 @@ class Translator:
         if o:
             t, why = marked, None
         else:
-            t, why = self._glot(marked)
+            t, why = self._glot(marked, like_ci)
         if t is None:
             return None, None, why
         t = re.sub(r'"?__sgp(\d+)__"?', lambda m: f'${m.group(1)}', t, flags=re.I)
