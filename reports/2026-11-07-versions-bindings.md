@@ -107,6 +107,44 @@ Ranked by severity. None has been reported upstream yet.
 - **Parameter binding in the JS driver** (#13): it bound parameters a statement doesn't use, and put a named
   parameter's value at the wrong index.
 
+## DuckDB 2.0.0 (added 2026-11-08)
+
+The `duckdb` arm (#15): DuckDB in its own dialect. Statements are translated by sqlglot 30.30, and the data is
+exported from the SQLite reference build and loaded with DuckDB's `COPY`. It ran on the whole corpus on a Vultr Genoa
+box, with one thread, 512 MB of memory and 2 GB of spill.
+
+| | statements |
+|---|---:|
+| same as SQLite | 823 |
+| rows differ (`rows`, `rowcount`) | 38 |
+| order or types only | 53 |
+| changes | 5 (the adapter's count with RETURNING, since fixed) |
+| runs disagree | 4 (`RETURNING id` from a sequence, which doesn't roll back) |
+| error | 313 |
+| missing (over the 240 s limit: atuin) | 66 |
+
+- **Errors are nearly all translation gaps, not DuckDB faults:**
+  - FTS `MATCH` (31);
+  - SQLite's date functions with modifiers: `date(x, '+1 day')`, `datetime()`, `julianday()` (42);
+  - SQLite's bare columns in `GROUP BY` (65 or more);
+  - SQLite-only tables (`page_stat`);
+  - views that failed to translate, and so are missing (`v_schedules`, `devicesview`);
+  - `substr` on integers;
+  - partial indexes and indexes with a collation, which DuckDB doesn't support (the statements still run, but without
+    the index).
+- **Row differences** are mostly ties under `LIMIT`, plus:
+  - `CAST(real AS INTEGER)` rounds in DuckDB and truncates in SQLite (2.7 gives 3 vs 2). ftl groups by it.
+  - `json_each`'s `value` is JSON-typed in DuckDB.
+  - `GROUP BY x` binds the column in DuckDB where SQLite binds an output alias of the same name (goatcounter).
+- **Fixed in the dialect layer by this run (#15):**
+  - SQLite's case-insensitive `LIKE` becomes `ILIKE` (for PostgreSQL too). mlflow, which sets `PRAGMA
+    case_sensitive_like`, keeps `LIKE`.
+  - DuckDB's `/` on two integers is real division unless `integer_division` is set, which the adapter now does.
+  - DuckDB's CSV sniffer refuses an empty file, so empty tables are no longer read.
+- **One known DuckDB problem:** atuin's search (`NOT EXISTS` with a correlated inequality) is planned as a full-scan
+  MARK join, duckdb/duckdb#27675 (open). Uncapped, it spilled 17 GB in four minutes on claude-box. Capped, it runs past
+  the time limit. A synthetic version takes 15.8 s at 20,000 rows, against 0.04 s in SQLite.
+
 ## Not done
 
 - SQLite 3.37.2 ran on half the corpus; 3.35.5 and 3.37.2 need rerunning with JSON1 (#12).
@@ -115,5 +153,6 @@ Ranked by severity. None has been reported upstream yet.
   screenpipe) and the apps with FTS tables.
 - libSQL: its newest bundle, at main a1d031c, is byte-identical to the pinned one (0.2.3, SQLite 3.47.0), so there is
   nothing newer to test.
-- DuckDB and MySQL through the dialect layer: not started.
+- MySQL/MariaDB through the dialect layer: not started (needs a client adapter). PostgreSQL wasn't re-run after
+  the dialect fixes.
 - SQLancer through sqlite-jdbc needs a JDK, which claude-box doesn't have.
