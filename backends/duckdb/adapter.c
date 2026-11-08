@@ -136,7 +136,8 @@ static int d_step(sg_stmt *x) {
     if (write && c0 && !strcmp(c0, "Count") && duckdb_column_type(&s->res, 0) == DUCKDB_TYPE_BIGINT) {
       s->nrows = 0; /* (a write without RETURNING: DuckDB's one row holding the count is changes, not a result) */
       s->nc = 0;
-    }
+    } else if (write && !s->c->changes)
+      s->c->changes = (int64_t)s->nrows; /* (with RETURNING DuckDB reports no count: one row per changed row) */
   }
   if (s->have == 2) return SG_ERROR;
   return ++s->row < s->nrows ? SG_ROW : SG_DONE;
