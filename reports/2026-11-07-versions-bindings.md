@@ -72,7 +72,16 @@ Ranked by severity. None has been reported upstream yet.
    indexes.** This is tursodatabase/turso#9282, fixed for 0.9. It is the 7th change-count difference (calibre), and
    `integrity_check` confirms the corruption. 0.9.0-pre.2 refuses every statement on such a file instead (#10033, open):
    joplin, signal-desktop, synapse, zotero and the other FTS apps can't be opened.
-5. **sql.js: a BigInt parameter is bound as TEXT.** This is known (sql-js/sql.js#341). atuin's `get_dups` returns 0 rows
+5. **Turso: an output alias in a JOIN's ON clause is "no such column".**
+   - Versions: 0.8.3 and 0.9.0-pre.2. SQLite resolves an output column's alias there, as it does in WHERE; Turso does
+     in WHERE but not in ON.
+   - Reproducer: `SELECT a * 2 AS b, i FROM t JOIN n ON i <= b - 4` fails with "no such column: b";
+     `SELECT a * 2 AS b FROM t WHERE b > 2` works.
+   - On the corpus: KOReader's `page_stat` view does exactly this (`JOIN ... ON idx <= (last_page - first_page + 1)`,
+     both output aliases), so all 17 KOReader statistics statements fail.
+   - Upstream: not found. #8721, #8710 and #7765 are other alias cases (ORDER BY, HAVING, a table alias defined later
+     in FROM).
+6. **sql.js: a BigInt parameter is bound as TEXT.** This is known (sql-js/sql.js#341). atuin's `get_dups` returns 0 rows
    instead of 27,155.
 
 ## Not bugs: unspecified, or a deliberate change
@@ -144,6 +153,19 @@ box, with one thread, 512 MB of memory and 2 GB of spill.
 - **One known DuckDB problem:** atuin's search (`NOT EXISTS` with a correlated inequality) is planned as a full-scan
   MARK join, duckdb/duckdb#27675 (open). Uncapped, it spilled 17 GB in four minutes on claude-box. Capped, it runs past
   the time limit. A synthetic version takes 15.8 s at 20,000 rows, against 0.04 s in SQLite.
+
+## Turbo under the oracles and mutation (added 2026-11-09)
+
+- **Turbo** is cursed-sqlite-turbo main at `1689862`, served (`QC_SERVE=1`).
+- **Hypothesis oracles:** `fuzz/props.py` at 2,000 examples per property, with 3 seeds. Differential, TLP, NoREC,
+  index, repeat (8 runs on one handle and fresh ones, across adapt's switches) and params all pass.
+- **Corpus mutation:** `fuzz/mutate.py --per 3 --seed 11`, about 3,000 mutants of the corpus's read statements. Each
+  mutant changes literals, LIMIT/OFFSET, negates or pads WHERE, or adds DISTINCT, and runs on the app's own data.
+  - turbo: 2,576 ran, all agree with SQLite.
+  - Turso 0.9.0-pre.2: 1,156 ran, with 96 differences, all of known kinds: unsupported SQL, bare columns
+    (#5545-like), ties under LIMIT, and finding 5 above. The two mutants whose originals agree both turned out to be
+    bare columns in GROUP BY.
+- So turbo has no wrong result anywhere in this session's runs: corpus, oracles or mutants.
 
 ## Not done
 
