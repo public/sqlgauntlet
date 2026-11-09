@@ -11,6 +11,7 @@ warm-up measured separately from steady state.
 | `libsql` | libSQL 0.2.3 (a SQLite 3.47.0 fork), its bundled amalgamation | built by `make backends` |
 | `turso` | Turso 0.8.3 (a Rust rewrite of SQLite's engine), over its C ABI (`sdk-kit`) | `sh backends/turso/fetch.sh build` (Rust), then `make turso` |
 | `postgres` | PostgreSQL, a client over libpq; statements translated by sqlglot, data exported from the SQLite build | `make postgres PG_URL=…` (libpq, `pip install sqlglot`); `backends/postgres/server.sh` starts a throwaway server in Docker |
+| `js-node`, `js-bun`, `js-sqljs`, `js-wasm` | SQLite through JavaScript bindings: `node:sqlite` (Node.js 26), `bun:sqlite` (Bun 1.4), sql.js 1.15 and the official `@sqlite.org/sqlite-wasm` 3.54.1; exe arms over `backends/js/driver.mjs`, which reads and binds values through each binding's own API. They find binding and value-conversion bugs, and each binding's build options, not engine bugs | `make js` (fetches pinned runtimes and packages), then `--arm js-node=exe:build/backends/js-node` |
 | any SQLite-API library | a fork or a patched build: `make sqlite-api NAME=<n> SRC=<dir>` | built from your tree |
 | DuckDB, MySQL | other dialects, through the same dialect layer | not yet |
 

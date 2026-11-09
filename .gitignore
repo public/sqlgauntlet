@@ -10,3 +10,4 @@ __pycache__/
 qct.*.txt
 .hypothesis/
 .pytest_cache/
+third_party/js/
