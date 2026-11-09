@@ -155,13 +155,14 @@ def prep(corpus, out, scale='1', projects=(), ids=None, wave='', heavy=False, di
         f = [] if tr else [f"@@X {x.rstrip(';')};\n" for x in meta.get('pragmas', [])]  # (SQLite's connection settings: SQLite dialects only)
         if not tr and (pdir / 'connect.sql').exists():  # (an app's per-connection setup: temp tables, triggers, views)
             f.append(f'@@X {one_line((pdir / "connect.sql").read_text())}\n')
+        like_ci = not any(re.search(r'case_sensitive_like\s*=\s*(1|true|on|yes)', x, re.I) for x in meta.get('pragmas', []))
         skipped = []
         for q in qs:
             tags = man.get(q['id'], {}).get('tags', [])
             sql = q['sql']
             params = q['params']
             if tr:
-                sql, params, why = tr.statement(q['id'], sql, params)
+                sql, params, why = tr.statement(q['id'], sql, params, like_ci)
                 if sql is None:
                     skipped.append((q['id'], why))
                     continue
