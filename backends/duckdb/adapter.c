@@ -136,8 +136,7 @@ static int d_step(sg_stmt *x) {
     if (write && c0 && !strcmp(c0, "Count") && duckdb_column_type(&s->res, 0) == DUCKDB_TYPE_BIGINT) {
       s->nrows = 0; /* (a write without RETURNING: DuckDB's one row holding the count is changes, not a result) */
       s->nc = 0;
-    } else if (write && !s->c->changes)
-      s->c->changes = (int64_t)s->nrows; /* (with RETURNING DuckDB reports no count: one row per changed row) */
+    } else if (write && !s->c->changes) s->c->changes = (int64_t)s->nrows; /* (with RETURNING DuckDB reports no count: one row per changed row) */
   }
   if (s->have == 2) return SG_ERROR;
   return ++s->row < s->nrows ? SG_ROW : SG_DONE;
@@ -234,27 +233,7 @@ static const char *d_version(void) {
 }
 
 static const sg_backend backend = {
-  SQLGAUNTLET_ABI,
-  "duckdb",
-  "duckdb",
-  d_version,
-  d_open,
-  d_close,
-  d_exec,
-  d_prepare,
-  d_param_count,
-  d_param_index,
-  d_bind,
-  d_step,
-  d_column_count,
-  d_column,
-  d_reset,
-  d_finalize,
-  d_changes,
-  d_errmsg,
-  0,
-  0,
-  0,
-  0,
+  SQLGAUNTLET_ABI, "duckdb",   "duckdb",  d_version, d_open, d_close, d_exec, d_prepare, d_param_count, d_param_index, d_bind, d_step, d_column_count, d_column,
+  d_reset,         d_finalize, d_changes, d_errmsg,  0,      0,       0,      0,
 };
 __attribute__((visibility("default"))) const sg_backend *sqlgauntlet_backend_v1(void) { return &backend; }
