@@ -12,6 +12,10 @@
 #ifndef SG_NO_CLI_EXTENSIONS
 #define SQLITE_EXTENSION_INIT1
 #define SQLITE_EXTENSION_INIT2(x)
+#ifndef SQLITE_INDEX_CONSTRAINT_LIMIT /* (SQLite before 3.38: never passed to xBestIndex there, so series.c's test is moot) */
+#define SQLITE_INDEX_CONSTRAINT_LIMIT  73
+#define SQLITE_INDEX_CONSTRAINT_OFFSET 74
+#endif
 #include "regexp.c"
 #include "series.c"
 #include "base64.c"

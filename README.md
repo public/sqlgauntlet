@@ -11,6 +11,10 @@ warm-up measured separately from steady state.
 | `libsql` | libSQL 0.2.3 (a SQLite 3.47.0 fork), its bundled amalgamation | built by `make backends` |
 | `turso` | Turso 0.8.3 (a Rust rewrite of SQLite's engine), over its C ABI (`sdk-kit`) | `sh backends/turso/fetch.sh build` (Rust), then `make turso` |
 | `postgres` | PostgreSQL, a client over libpq; statements translated by sqlglot, data exported from the SQLite build | `make postgres PG_URL=…` (libpq, `pip install sqlglot`); `backends/postgres/server.sh` starts a throwaway server in Docker |
+| `sqlite-X.Y.Z` | SQLite at another version (3.35.5 to 3.53.4 by default: what Ubuntu 22.04/24.04 and Debian 12/13 ship, and the last of each line since), same options | `make sqlite-version V=X.Y.Z`, `make sqlite-versions` |
+| `sqlite-<variant>` | SQLite 3.54.1 with one compile option changed: `stat4`, `sorter-refs`, `no-autoindex`, `null-trim`, `O0`, `O3` (none may change a result), `dqs0`, `fkeys` (these do, on purpose) | `make sqlite-variants` |
+| `sqlite-system` | the platform's own libsqlite3, linked (Ubuntu 24.04: 3.45.1 with Debian's options) | `make sqlite-system` |
+| `turso-<tag>` | another Turso tag from `backends/turso/tags.tsv` (e.g. v0.9.0-pre.2) | `sh backends/turso/fetch.sh build <tag>`, then `make turso-tag TAG=<tag>` |
 | any SQLite-API library | a fork or a patched build: `make sqlite-api NAME=<n> SRC=<dir>` | built from your tree |
 | DuckDB, MySQL | other dialects, through the same dialect layer | not yet |
 
