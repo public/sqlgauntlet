@@ -17,7 +17,8 @@ case $(uname -s)-$(uname -m) in
   Darwin-arm64) NP=darwin-arm64; BP=darwin-aarch64 ;; Darwin-x86_64) NP=darwin-x64; BP=darwin-x64 ;;
   *) echo "fetch.sh: no prebuilt runtimes for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
-for w in ${*:-node bun sqljs wasm}; do
+[ $# -gt 0 ] || set -- node bun sqljs wasm
+for w in "$@"; do
   D=$J/$w; [ -f "$D/.done" ] && continue
   rm -rf "$D"; mkdir -p "$D"
   case $w in

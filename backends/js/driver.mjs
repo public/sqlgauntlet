@@ -13,7 +13,7 @@
 // norm lines are byte-compatible with src/driver.c's (FNV-1a over each value's kind and bytes; %.*g normalisation).
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {fileURLToPath} from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TP = path.resolve(HERE, '../../third_party/js');
@@ -26,20 +26,20 @@ async function load(b) {
   if (b === 'node') {
     const { DatabaseSync } = await import('node:sqlite');
     return {
-      version: () => `node:sqlite ${process.version}, SQLite ${new DatabaseSync(':memory:').prepare('SELECT sqlite_version() v').get().v}`,
+      version : () => `node:sqlite ${process.version}, SQLite ${new DatabaseSync(':memory:').prepare('SELECT sqlite_version() v').get().v}`,
       open(p) {
         const db = new DatabaseSync(p);
         return {
           db,
-          exec: (s) => db.exec(s),
+          exec : (s) => db.exec(s),
           prepare(s) {
             const st = db.prepare(s);
             st.setReadBigInts(true);
             st.setReturnArrays(true);
             st.setAllowBareNamedParameters(false);
-            return { all: (named, pos, numbered) => (named ? st.all(named, ...(numbered || pos)) : st.all(...pos)), close() {} };
+            return { all : (named, pos, numbered) => (named ? st.all(named, ...(numbered || pos)) : st.all(...pos)), close() {} };
           },
-          changes: () => Number(db.prepare('SELECT changes() c').get().c),
+          changes : () => Number(db.prepare('SELECT changes() c').get().c),
         };
       },
     };
@@ -47,34 +47,37 @@ async function load(b) {
   if (b === 'bun') {
     const { Database } = await import('bun:sqlite');
     return {
-      version: () => `bun:sqlite ${Bun.version}, SQLite ${new Database(':memory:').query('SELECT sqlite_version() v').get().v}`,
+      version : () => `bun:sqlite ${Bun.version}, SQLite ${new Database(':memory:').query('SELECT sqlite_version() v').get().v}`,
       open(p) {
-        const db = new Database(p, { safeIntegers: true });
+        const db = new Database(p, { safeIntegers : true });
         return {
           db,
-          exec: (s) => db.run(s),
+          exec : (s) => db.run(s),
           prepare(s) {
             const st = db.prepare(s);
             return {
-              all: (named, pos) => (pos.length ? st.values(...pos) : named ? st.values(named) : st.values()),
-              close: () => st.finalize(),
+              all : (named, pos) => (pos.length ? st.values(...pos)
+                                     : named    ? st.values(named)
+                                                : st.values()),
+              close : () => st.finalize(),
             };
           },
-          changes: () => Number(db.query('SELECT changes() c').get().c),
+          changes : () => Number(db.query('SELECT changes() c').get().c),
         };
       },
     };
   }
   if (b === 'sqljs') {
     const init = (await import(path.join(TP, 'sqljs/dist/sql-wasm.js'))).default;
-    const SQL = await init({ locateFile: (f) => path.join(TP, 'sqljs/dist', f) });
+    const SQL = await init({ locateFile : (f) => path.join(TP, 'sqljs/dist', f) });
     return {
-      version: () => `sql.js ${JSON.parse(fs.readFileSync(path.join(TP, 'sqljs/package.json'))).version}, SQLite ${new SQL.Database().exec('SELECT sqlite_version()')[0].values[0][0]}`,
+      version : () => `sql.js ${JSON.parse(fs.readFileSync(path.join(TP, 'sqljs/package.json'))).version}, SQLite ${
+        new SQL.Database().exec('SELECT sqlite_version()')[0].values[0][0]}`,
       open(p) {
         const db = new SQL.Database(p === ':memory:' ? undefined : fs.readFileSync(p));
         return {
           db,
-          exec: (s) => db.exec(s),
+          exec : (s) => db.exec(s),
           prepare(s) {
             const st = db.prepare(s);
             return {
@@ -83,13 +86,13 @@ async function load(b) {
                 if (pos.length) st.bind(pos); // (by index, named ones included)
                 else if (named) st.bind(named);
                 const rows = [];
-                while (st.step()) rows.push(st.get(null, { useBigInt: true }));
+                while (st.step()) rows.push(st.get(null, { useBigInt : true }));
                 return rows;
               },
-              close: () => st.free(),
+              close : () => st.free(),
             };
           },
-          changes: () => db.getRowsModified(),
+          changes : () => db.getRowsModified(),
         };
       },
     };
@@ -99,7 +102,7 @@ async function load(b) {
     const S = await init();
     const C = S.capi;
     return {
-      version: () => `@sqlite.org/sqlite-wasm ${JSON.parse(fs.readFileSync(path.join(TP, 'wasm/package.json'))).version}, SQLite ${C.sqlite3_libversion()}`,
+      version : () => `@sqlite.org/sqlite-wasm ${JSON.parse(fs.readFileSync(path.join(TP, 'wasm/package.json'))).version}, SQLite ${C.sqlite3_libversion()}`,
       open(p) {
         let f = ':memory:';
         const bytes = p === ':memory:' ? null : new Uint8Array(fs.readFileSync(p));
@@ -110,14 +113,15 @@ async function load(b) {
         const db = new S.oo1.DB(f);
         return {
           db,
-          exec: (s) => db.exec(s),
+          exec : (s) => db.exec(s),
           prepare(s) {
             const st = db.prepare(s);
             return {
               all(named, pos) {
                 st.reset(true);
                 if (pos.length) pos.forEach((v, i) => st.bind(i + 1, v)); // (by index, named ones included)
-                else if (named) for (const [k, v] of Object.entries(named)) st.bind(k, v);
+                else if (named)
+                  for (const [k, v] of Object.entries(named)) st.bind(k, v);
                 const rows = [];
                 while (st.step()) {
                   const r = [];
@@ -129,10 +133,10 @@ async function load(b) {
                 }
                 return rows;
               },
-              close: () => st.finalize(),
+              close : () => st.finalize(),
             };
           },
-          changes: () => db.changes(),
+          changes : () => db.changes(),
         };
       },
     };
@@ -145,7 +149,10 @@ const enc = new TextEncoder();
 const scratch = new DataView(new ArrayBuffer(8));
 const S8 = new Uint8Array(scratch.buffer);
 class H {
-  constructor() { this.hi = 0x14650fb0; this.lo = 0x739d0383; } // (driver.c's offset basis 1469598103934665603: FNV's, its last digit dropped)
+  constructor() {
+    this.hi = 0x14650fb0;
+    this.lo = 0x739d0383;
+  } // (driver.c's offset basis 1469598103934665603: FNV's, its last digit dropped)
   bytes(u8) {
     let hi = this.hi, lo = this.lo;
     for (let i = 0; i < u8.length; i++) {
@@ -155,12 +162,22 @@ class H {
       hi = (Math.imul(hi, 0x1b3) + Math.floor(t / 4294967296) + (lo << 8)) >>> 0;
       lo = nlo;
     }
-    this.hi = hi; this.lo = lo;
+    this.hi = hi;
+    this.lo = lo;
     return this;
   }
-  i32(x) { scratch.setInt32(0, x, true); return this.bytes(S8.subarray(0, 4)); }
-  i64(b) { scratch.setBigInt64(0, BigInt.asIntN(64, b), true); return this.bytes(S8); }
-  f64(d) { scratch.setFloat64(0, d, true); return this.bytes(S8); }
+  i32(x) {
+    scratch.setInt32(0, x, true);
+    return this.bytes(S8.subarray(0, 4));
+  }
+  i64(b) {
+    scratch.setBigInt64(0, BigInt.asIntN(64, b), true);
+    return this.bytes(S8);
+  }
+  f64(d) {
+    scratch.setFloat64(0, d, true);
+    return this.bytes(S8);
+  }
   big() { return (BigInt(this.hi) << 32n) | BigInt(this.lo); }
 }
 const M64 = (1n << 64n) - 1n;
@@ -219,17 +236,18 @@ function parse(text) {
   for (const line of text.split('\n')) {
     if (line.startsWith('@@Q ')) {
       const [id, ordered, write, tags] = line.slice(4).split(' ');
-      qs.push({ id, ordered: +ordered, write: +write, tags: (tags || '').split(','), sql: null, params: [] });
+      qs.push({ id, ordered : +ordered, write : +write, tags : (tags || '').split(','), sql : null, params : [] });
     } else if (line.startsWith('@@X ') && !qs.length) pragma.push(line.slice(4));
     else if (line.startsWith('@@P ') && qs.length) {
       const s = line.slice(4), k = s.indexOf(' ');
-      if (k > 0) qs[qs.length - 1].params.push([s.slice(0, k), s.slice(k + 1)]);
+      if (k > 0) qs[qs.length - 1].params.push([ s.slice(0, k), s.slice(k + 1) ]);
     } else if (qs.length) {
       const q = qs[qs.length - 1];
       q.sql = q.sql === null ? line : `${q.sql}\n${line}`;
     }
   }
-  for (const q of qs) if (q.sql !== null) q.sql = q.sql.replace(/\n$/, '');
+  for (const q of qs)
+    if (q.sql !== null) q.sql = q.sql.replace(/\n$/, '');
   return { qs, pragma };
 }
 
@@ -237,9 +255,11 @@ function parse(text) {
 const errmsg = (e) => String((e && e.message) || e).replace(/[\t\n]/g, ' ');
 function exec1(c, q, st, args, rowsOut) {
   if (q.write) c.exec('BEGIN');
-  const r = { rows: 0, h: 0n, hs: 0n, nh: 0n, nhs: 0n, changes: 0, err: '' };
+  const r = { rows : 0, h : 0n, hs : 0n, nh : 0n, nhs : 0n, changes : 0, err : '' };
   let rows = [];
-  try { rows = st.all(args.named, args.pos, args.numbered); } catch (e) { r.err = errmsg(e); }
+  try {
+    rows = st.all(args.named, args.pos, args.numbered);
+  } catch (e) { r.err = errmsg(e); }
   const H0 = new H(), N0 = new H();
   for (const row of rows) {
     const rh = new H(), nrh = new H();
@@ -255,15 +275,24 @@ function exec1(c, q, st, args, rowsOut) {
     }
     if (rowsOut && r.rows < rowsOut.limit) rowsOut.lines.push(row.length ? out.join('\t') : '(no columns)');
     const a = rh.big(), b = nrh.big();
-    scratch.setBigUint64(0, a, true); H0.bytes(S8);
+    scratch.setBigUint64(0, a, true);
+    H0.bytes(S8);
     r.hs = (r.hs + mix(a)) & M64;
-    scratch.setBigUint64(0, b, true); N0.bytes(S8);
+    scratch.setBigUint64(0, b, true);
+    N0.bytes(S8);
     r.nhs = (r.nhs + mix(b)) & M64;
     r.rows++;
   }
-  r.h = H0.big(); r.nh = N0.big();
-  try { r.changes = c.changes(); } catch { r.changes = -1; }
-  if (q.write) { try { c.exec('ROLLBACK'); } catch {} }
+  r.h = H0.big();
+  r.nh = N0.big();
+  try {
+    r.changes = c.changes();
+  } catch { r.changes = -1; }
+  if (q.write) {
+    try {
+      c.exec('ROLLBACK');
+    } catch {}
+  }
   return r;
 }
 function paramsOf(sql) { // the parameters the SQL text uses (outside strings, quoted names and comments): the bound
@@ -277,9 +306,12 @@ function paramsOf(sql) { // the parameters the SQL text uses (outside strings, q
       i++;
       while (i < sql.length && !(sql[i] === end && sql[i + 1] !== end)) i += sql[i] === end ? 2 : 1;
       i++;
-    } else if (ch === '-' && sql[i + 1] === '-') { while (i < sql.length && sql[i] !== '\n') i++; }
-    else if (ch === '/' && sql[i + 1] === '*') { const e = sql.indexOf('*/', i + 2); i = e < 0 ? sql.length : e + 2; }
-    else if (ch === '?') {
+    } else if (ch === '-' && sql[i + 1] === '-') {
+      while (i < sql.length && sql[i] !== '\n') i++;
+    } else if (ch === '/' && sql[i + 1] === '*') {
+      const e = sql.indexOf('*/', i + 2);
+      i = e < 0 ? sql.length : e + 2;
+    } else if (ch === '?') {
       let j = i + 1;
       while (j < sql.length && sql[j] >= '0' && sql[j] <= '9') j++;
       n = j > i + 1 ? Math.max(n, parseInt(sql.slice(i + 1, j), 10)) : n + 1;
@@ -292,7 +324,7 @@ function paramsOf(sql) { // the parameters the SQL text uses (outside strings, q
       i = j;
     } else i++;
   }
-  return { named, count: n };
+  return { named, count : n };
 }
 function evalParams(c, q) { // each literal through the binding: its value, as an app would hand it over
   const named = {}, pos = [];
@@ -309,46 +341,77 @@ function evalParams(c, q) { // each literal through the binding: its value, as a
     else named[name] = v;
   }
   const use = paramsOf(q.sql); // (only what the statement has: a binding refuses extra values, the C driver skips them)
-  for (const k of Object.keys(named)) if (!use.named.has(k)) delete named[k];
+  for (const k of Object.keys(named))
+    if (!use.named.has(k)) delete named[k];
   const full = []; // (every parameter by its SQLite index, numbered and named)
   for (let i = 0; i < use.count; i++) full[i] = pos[i] === undefined ? null : pos[i];
-  for (const [k, ix] of use.named) if (k in named) full[ix - 1] = named[k];
+  for (const [k, ix] of use.named)
+    if (k in named) full[ix - 1] = named[k];
   const nix = new Set(use.named.values());
   const numbered = full.filter((_, i) => !nix.has(i + 1)); // (node binds positional values to the unnamed ones, in order)
-  return { named: Object.keys(named).length ? named : null, pos: full, numbered };
+  return { named : Object.keys(named).length ? named : null, pos : full, numbered };
 }
 
 async function main() {
   const B = await load(binding);
-  if (mode === 'info') { console.log(`info\tjs-${binding}\tsqlite\t${B.version()}`); return 0; }
-  if (!['check', 'rows'].includes(mode)) { console.error(`driver.mjs: mode ${mode}: check, rows or info`); return 2; }
+  if (mode === 'info') {
+    console.log(`info\tjs-${binding}\tsqlite\t${B.version()}`);
+    return 0;
+  }
+  if (!['check', 'rows'].includes(mode)) {
+    console.error(`driver.mjs: mode ${mode}: check, rows or info`);
+    return 2;
+  }
   const c = B.open(dbPath);
   const { qs, pragma } = parse(fs.readFileSync(qFile, 'utf8'));
   for (const p of pragma) c.exec(p);
   const out = [];
-  const flush = () => { if (out.length) { fs.writeSync(1, out.join('')); out.length = 0; } };
+  const flush = () => {
+    if (out.length) {
+      fs.writeSync(1, out.join(''));
+      out.length = 0;
+    }
+  };
   for (const q of qs) {
     if (only && q.id !== only) continue;
     const args = evalParams(c, q);
     if (mode === 'rows') {
-      const ro = { limit: lim ? parseInt(lim, 10) : 20, lines: [] };
-      let r = { rows: 0, err: '' };
-      try { const st = c.prepare(q.sql); r = exec1(c, q, st, args, ro); st.close(); } catch (e) { r.err = `prepare: ${errmsg(e)}`; }
+      const ro = { limit : lim ? parseInt(lim, 10) : 20, lines : [] };
+      let r = { rows : 0, err : '' };
+      try {
+        const st = c.prepare(q.sql);
+        r = exec1(c, q, st, args, ro);
+        st.close();
+      } catch (e) { r.err = `prepare: ${errmsg(e)}`; }
       out.push(`rows\t${q.id}\n`, ...ro.lines.map((l) => `${l}\n`), `rows\t${q.id}\t${r.rows} rows\t${r.err || '-'}\n`);
       continue;
     }
     const wall = q.tags.includes('wallclock');
-    let status = 'ok', runs = 0, st = null, r0 = { rows: 0, changes: 0, h: 0n, hs: 0n, nh: 0n, nhs: 0n, err: '' };
-    try { st = c.prepare(q.sql); } catch (e) { status = 'err'; r0.err = `prepare: ${errmsg(e)}`; }
+    let status = 'ok', runs = 0, st = null, r0 = { rows : 0, changes : 0, h : 0n, hs : 0n, nh : 0n, nhs : 0n, err : '' };
+    try {
+      st = c.prepare(q.sql);
+    } catch (e) {
+      status = 'err';
+      r0.err = `prepare: ${errmsg(e)}`;
+    }
     if (st) {
       for (let k = 0; k < 8; k++) {
         if (k >= 6) {
-          st.close(); st = null;
-          try { st = c.prepare(q.sql); } catch { status = 'unstable'; break; }
+          st.close();
+          st = null;
+          try {
+            st = c.prepare(q.sql);
+          } catch {
+            status = 'unstable';
+            break;
+          }
         }
         const r = exec1(c, q, st, args, null);
         runs++;
-        if (!k) { r0 = r; continue; }
+        if (!k) {
+          r0 = r;
+          continue;
+        }
         if (r.rows !== r0.rows || (!wall && (q.ordered ? r.h !== r0.h : r.hs !== r0.hs)) || r.changes !== r0.changes || r.err !== r0.err) {
           status = 'unstable';
           r0.err += ` [run ${k}: ${r.rows} rows ${hex(r.h)} ${r.err}]`;
@@ -366,4 +429,7 @@ async function main() {
   flush();
   return 0;
 }
-main().then((rc) => process.exit(rc), (e) => { console.error(`driver.mjs: ${e.stack || e}`); process.exit(1); });
+main().then((rc) => process.exit(rc), (e) => {
+  console.error(`driver.mjs: ${e.stack || e}`);
+  process.exit(1);
+});
